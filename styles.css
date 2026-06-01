@@ -1,0 +1,570 @@
+/* ============================================================
+   VoltCheck PDF Generator
+   - App UI (drop area, buttons, preview frame)
+   - Report styles (A4 pages, branded header/footer)
+   - Print rules (browser → "Save as PDF")
+   ============================================================ */
+
+@page {
+  size: A4;
+  margin: 0;
+}
+
+:root {
+  --vc-green: #00E676;
+  --vc-green-dark: #00B85F;
+  --vc-green-soft: #d8f8e6;
+  --vc-ink: #1a1a1a;
+  --vc-ink-2: #2b2f33;
+  --vc-muted: #6b7280;
+  --vc-line: #e5e7eb;
+  --vc-surface: #f4f5f7;
+  --vc-surface-2: #eceef1;
+  --autel-red: #e30613;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: #f7f8fa;
+  color: var(--vc-ink);
+}
+
+/* ---------- App shell (minimal: drop zone + save button + preview) ---------- */
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 32px 20px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 36px 20px;
+  border: 2px dashed var(--vc-line);
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.drop:hover, .drop.over {
+  border-color: var(--vc-green);
+  background: #fafffb;
+}
+.drop-title { font-weight: 600; font-size: 15px; }
+.drop-sub { color: var(--vc-muted); font-size: 13px; }
+
+button {
+  font: inherit;
+  padding: 12px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--vc-ink);
+  background: var(--vc-ink);
+  color: var(--vc-green);
+  cursor: pointer;
+  font-weight: 700;
+  align-self: flex-start;
+}
+button:hover { background: #000; }
+
+.error {
+  margin: 0;
+  font-size: 13px;
+  color: #8a1f1f;
+}
+
+.preview-wrap { margin-top: 8px; }
+.preview {
+  background: #d9dde2;
+  padding: 24px;
+  border-radius: 12px;
+  overflow: auto;
+}
+/* Downscale so an A4 page fits the column comfortably */
+.preview .report {
+  transform-origin: top center;
+  transform: scale(.78);
+  margin-bottom: -22%;
+}
+
+/* ============================================================
+   REPORT (A4 pages)
+   ============================================================ */
+
+.report {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  color: var(--vc-ink);
+}
+
+.page {
+  width: 210mm;
+  height: 297mm;
+  background: #fff;
+  margin: 0 auto 16px;
+  padding: 14mm 16mm 22mm;
+  position: relative;
+  box-shadow: 0 4px 24px rgba(0,0,0,.08);
+  page-break-after: always;
+  break-after: page;
+  overflow: hidden;
+}
+.page:last-child { page-break-after: auto; break-after: auto; }
+
+/* ---------- Header ---------- */
+.rep-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 6mm;
+  border-bottom: 2px solid var(--vc-ink);
+  margin-bottom: 5mm;
+}
+.rep-header-sm { padding-bottom: 4mm; margin-bottom: 4mm; }
+
+.brand-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.vc-logo { width: 34px; height: 34px; }
+.vc-logo-sm { width: 18px; height: 18px; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.05; }
+.brand-name {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--vc-ink);
+  display: inline-flex;
+  align-items: center;
+}
+.brand-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--vc-green);
+  margin-left: 5px;
+  border-radius: 1px;
+  align-self: flex-end;
+  margin-bottom: 3px;
+}
+.brand-tag {
+  font-size: 10px;
+  color: var(--vc-muted);
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  margin-top: 2px;
+}
+
+.brand-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.autel-mark {
+  font-family: Arial, sans-serif;
+  font-weight: 900;
+  font-size: 20px;
+  color: var(--autel-red);
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+.autel-mark sup { font-size: 9px; vertical-align: super; }
+.cara-img {
+  height: 12mm;
+  width: auto;
+  display: block;
+  border-radius: 2px;
+}
+
+.meta-right {
+  font-size: 10px;
+  color: var(--vc-muted);
+  text-align: right;
+  line-height: 1.5;
+}
+.meta-right b { color: var(--vc-ink); font-weight: 600; }
+
+/* ---------- Titles ---------- */
+.rep-title {
+  font-size: 22px;
+  margin: 3mm 0 1mm;
+  color: var(--vc-ink);
+  /* Give every glyph a little air so the hyphen in
+     "Akkumulátor-állapotjelentés" doesn't visually collide with the Á's. */
+  letter-spacing: 0.02em;
+}
+.rep-subtitle {
+  font-size: 12px;
+  margin: 0 0 5mm;
+  color: var(--vc-muted);
+  font-weight: 500;
+}
+.rep-subtitle.big {
+  font-size: 16px;
+  color: var(--vc-ink);
+  font-weight: 700;
+  margin-bottom: 4mm;
+}
+
+/* ---------- Blocks ---------- */
+.block { margin-bottom: 5mm; }
+.block-title {
+  font-size: 11px;
+  margin: 0 0 3mm;
+  padding: 5px 10px;
+  background: var(--vc-ink);
+  color: var(--vc-green);
+  border-radius: 4px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+/* ---------- Key/value grid ---------- */
+.kv-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 24px;
+  font-size: 10.5px;
+}
+.kv-grid > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--vc-line);
+}
+.kv-grid span { color: var(--vc-muted); }
+.kv-grid b { font-weight: 600; color: var(--vc-ink); }
+
+/* ============================================================
+   PACK INFORMATION — gauge artwork cropped from source + HU labels
+   ============================================================ */
+.gauges-img {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-bottom: 3mm;
+}
+.gauges-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 5mm;
+  margin-bottom: 5mm;
+}
+.gcol { text-align: center; }
+.gcol-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--vc-ink-2);
+  margin-bottom: 2mm;
+  min-height: 8mm;   /* keep columns vertically aligned when label wraps */
+}
+.gcol-metrics {
+  border-top: 1px solid var(--vc-line);
+  padding-top: 2mm;
+  font-size: 9.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+.gcol-metrics > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gcol-metrics span { color: var(--vc-muted); }
+.gcol-metrics b { color: var(--vc-ink); font-weight: 600; }
+
+/* ---------- Bars (energy / range, generated) ----------
+   One shared bar: the fill = SOH. Energy is annotated above it,
+   range below it, both pointing at the same fill boundary — exactly
+   like the source PDF. Colors match Autel's bar (green #4CB050). */
+.bars-section { margin-bottom: 5mm; }
+.bar-annot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8mm;
+}
+.bar-side {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--vc-ink-2);
+  line-height: 1.25;
+}
+.bar-vals {
+  display: flex;
+  align-items: flex-end;
+}
+/* Cropped numeric value group from the source PDF ("38 kWh | 40 kWh" etc.).
+   Height is fixed to match the label type size; width follows via aspect-ratio. */
+.bar-valimg {
+  height: 13px;
+  width: auto;
+  display: block;
+}
+.bar-track {
+  position: relative;
+  height: 6mm;
+  background: #d9d9d9;
+  border-radius: 2px;
+  margin: 11px 0;
+}
+.bar-fill {
+  height: 100%;
+  background: #4CB050;
+  border-radius: 2px 0 0 2px;
+}
+/* Triangle markers centered on the fill boundary, above and below. */
+.bar-marker {
+  position: absolute;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 4.5px solid transparent;
+  border-right: 4.5px solid transparent;
+}
+.bar-marker-down { top: -10px;    border-top: 7px solid #4CB050; }
+.bar-marker-up   { bottom: -10px; border-bottom: 7px solid #4CB050; }
+
+.note {
+  font-size: 9px;
+  color: var(--vc-muted);
+  line-height: 1.5;
+  margin: 4mm 0 0;
+}
+
+/* ---------- DTC ---------- */
+.dtc {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--vc-surface);
+  padding: 3mm 5mm;
+  border-radius: 8px;
+  font-size: 11px;
+}
+.dtc-icon {
+  width: 22px; height: 22px;
+  background: var(--vc-green);
+  color: #fff;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 12px;
+}
+.dtc.has-fault .dtc-icon { background: #d8443c; }
+
+/* ============================================================
+   STATS GRID (page 2/3 stats)
+   ============================================================ */
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 24px;
+  font-size: 10px;
+  margin-bottom: 4mm;
+}
+.stats-grid > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--vc-line);
+}
+.stats-grid span { color: var(--vc-muted); }
+.stats-grid b { color: var(--vc-ink); font-weight: 700; }
+
+/* ============================================================
+   LEGEND
+   ============================================================ */
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  color: var(--vc-muted);
+  margin-bottom: 2mm;
+  justify-content: flex-end;
+}
+.lg-text { color: var(--vc-muted); }
+.lg-grad {
+  width: 18mm;
+  height: 6px;
+  background: linear-gradient(90deg, #ffffff, var(--vc-green));
+  border: 1px solid var(--vc-line);
+  border-radius: 2px;
+  margin: 0 2px;
+}
+.lg-warn, .lg-notok {
+  display: inline-block;
+  font-weight: 800;
+  font-size: 10px;
+  margin-left: 6px;
+  width: 14px;
+  height: 14px;
+  text-align: center;
+  line-height: 14px;
+  border-radius: 50%;
+}
+.lg-warn { background: #ffe28a; color: #8a5a00; }
+.lg-notok { background: #f5b4b0; color: #8a1f1f; }
+
+/* ============================================================
+   MODULE / CELL TABLE
+   ============================================================ */
+.mod-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9px;
+  margin-bottom: 4mm;
+}
+.mod-table th, .mod-table td {
+  border: 1px solid var(--vc-line);
+  padding: 2.5px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+.mod-table thead th {
+  background: var(--vc-ink);
+  color: var(--vc-green);
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.mod-table thead .sub th {
+  background: var(--vc-surface);
+  color: var(--vc-ink);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.mod-table .row-label {
+  font-weight: 700;
+  background: var(--vc-surface);
+  text-align: left;
+  padding-left: 8px;
+}
+.mod-table .row-modval {
+  background: var(--vc-surface);
+  font-weight: 700;
+}
+.mod-table td.cell {
+  position: relative;
+}
+/* Lightly tint each cell by its rank (assigned by JS via --tint) */
+.mod-table td.cell {
+  background: rgba(0, 230, 118, calc(var(--tint, 0) * 0.5));
+}
+.mod-table.compact { font-size: 8.5px; }
+.mod-table.compact th, .mod-table.compact td { padding: 3px 5px; }
+
+/* ============================================================
+   DISCLAIMER (page 4)
+   ============================================================ */
+.disclaimer ol {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--vc-ink-2);
+  padding-left: 18px;
+  margin: 0;
+}
+.disclaimer li { margin-bottom: 3mm; }
+.form-note {
+  font-size: 10px;
+  color: var(--vc-muted);
+  margin-top: 6mm;
+}
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+.rep-footer {
+  position: absolute;
+  left: 16mm;
+  right: 16mm;
+  bottom: 10mm;
+  padding-top: 4mm;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--vc-muted);
+}
+.foot-accent {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--vc-ink) 0 30%, var(--vc-green) 30% 32%, var(--vc-line) 32%);
+}
+.foot-left { display: flex; align-items: center; gap: 6px; color: var(--vc-ink); font-weight: 600; }
+.foot-mid a { color: var(--vc-green-dark); text-decoration: none; font-weight: 600; }
+
+/* App-shell hint shown after a preview is rendered */
+.print-hint {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: #fff;
+  border: 1px solid var(--vc-line);
+  border-left: 3px solid var(--vc-green);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--vc-ink-2);
+}
+
+/* ============================================================
+   PRINT — used by the browser's "Save as PDF" flow.
+   Hides the app UI, removes the preview's scale/shadow, and
+   forces background colors so the dark block-title pills,
+   neon-green accents, and CARA badge render properly.
+   ============================================================ */
+@media print {
+  html, body {
+    background: #fff;
+    margin: 0;
+    padding: 0;
+  }
+  /* Hide the app chrome — only .report should print */
+  .drop, button, .error { display: none !important; }
+  .app { padding: 0; max-width: none; margin: 0; min-height: 0; display: block; }
+
+  /* Move the preview back into normal flow so page-break rules work */
+  .preview-wrap {
+    position: static;
+    left: auto;
+    top: auto;
+    width: auto;
+  }
+  .preview { background: #fff; }
+
+  .page {
+    margin: 0;
+    box-shadow: none;
+    page-break-after: always;
+    break-after: page;
+    overflow: hidden;
+  }
+  .page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  /* Force the browser to render background colors / images */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+}

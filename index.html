@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VoltCheck PDF Generátor</title>
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+</script>
+</head>
+<body>
+
+<main class="app">
+  <label id="drop" class="drop">
+    <input type="file" id="file" accept="application/pdf" hidden />
+    <span class="drop-title" id="dropTitle">PDF feltöltése</span>
+    <span class="drop-sub" id="dropSub">Húzd ide vagy kattints</span>
+  </label>
+
+  <button id="download" type="button" hidden>Mentés PDF-ként</button>
+  <p id="error" class="error" hidden></p>
+
+  <div id="previewWrap" class="preview-wrap" hidden>
+    <div id="preview" class="preview"></div>
+  </div>
+</main>
+
+<!-- Report template (cloned + populated, then rendered to PDF) -->
+<template id="reportTemplate">
+  <div class="report">
+
+    <!-- ============================================================
+         PAGE 1 — Header, vehicle, pack info (3 gauges), bars, DTCs
+         ============================================================ -->
+    <section class="page">
+      <header class="rep-header">
+        <div class="brand-left">
+          <svg class="vc-logo" viewBox="0 0 56 56" aria-hidden="true">
+            <polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/>
+          </svg>
+          <div class="brand-text">
+            <span class="brand-name">VoltCheck<span class="brand-dot"></span></span>
+            <span class="brand-tag">Akkumulátor diagnosztika</span>
+          </div>
+        </div>
+        <div class="brand-right">
+          <div class="autel-mark">AUTEL<sup>®</sup></div>
+          <img class="cara-img" src="Logo-Cara-ABHC-short-2023.png" alt="CARA - Approved Battery Health Check" />
+        </div>
+      </header>
+
+      <h1 class="rep-title">Akkumulátor-állapotjelentés</h1>
+      <h2 class="rep-subtitle">SOH Gyorsteszt</h2>
+
+      <section class="block">
+        <h3 class="block-title">Jármű adatok</h3>
+        <div class="kv-grid">
+          <div><span>Modell:</span><b data-f="vehicle"></b></div>
+          <div><span>Teszt időpontja:</span><b data-f="testTime"></b></div>
+          <div><span>Névleges feszültség:</span><b data-f="ratedVoltage"></b></div>
+          <div><span>Névleges kapacitás:</span><b data-f="ratedCapacity"></b></div>
+          <div><span>Kilométeróra-állás:</span><b data-f="odometer"></b></div>
+          <div><span>Alvázszám:</span><b data-f="vin"></b></div>
+          <div><span>Sorozatszám:</span><b data-f="sn"></b></div>
+        </div>
+      </section>
+
+      <section class="block">
+        <h3 class="block-title">Akkumulátor-csomag információk</h3>
+
+        <!-- Gauge artwork is cropped straight from the original Autel PDF
+             so the letter grades + arrow indicators stay exactly as Autel
+             produced them. Below it: 3 columns of Hungarian labels and
+             the extracted metric values, aligned with the image columns. -->
+        <img class="gauges-img" data-gauges-img alt="Akkumulátor-csomag állapotjelzők" />
+        <div class="gauges-grid">
+          <div class="gcol">
+            <div class="gcol-label">Akkumulátor egészségi állapot</div>
+            <div class="gcol-metrics">
+              <div><span>SOH*:</span><b data-f="soh"></b></div>
+              <div><span>SOC:</span><b data-f="soc"></b></div>
+            </div>
+          </div>
+          <div class="gcol">
+            <div class="gcol-label">Statikus hőmérséklet-konzisztencia</div>
+            <div class="gcol-metrics">
+              <div><span>Akkumulátor hőmérséklet:</span><b data-f="batteryTemp"></b></div>
+              <div><span>Max. hőmérsékletkülönbség:</span><b data-f="maxTempDelta"></b></div>
+            </div>
+          </div>
+          <div class="gcol">
+            <div class="gcol-label">Statikus feszültség-konzisztencia</div>
+            <div class="gcol-metrics">
+              <div><span>Akkumulátor feszültség:</span><b data-f="batteryVoltage"></b></div>
+              <div><span>Max. feszültségkülönbség:</span><b data-f="maxVoltageDelta"></b></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Energy + range "load bar".
+             The bar graphic is generated — one shared bar whose green fill is
+             driven by SOH, with triangle markers at the fill boundary, exactly
+             like the source. The Hungarian row labels are ours; the numeric
+             value groups ("38 kWh | 40 kWh", "256.5 km | 270 km") are cropped
+             straight from the source PDF (they're vector-drawn, not text), so
+             the figures stay 100% faithful. -->
+        <div class="bars-section">
+          <div class="bar-annot">
+            <span class="bar-side">Energia</span>
+            <span class="bar-vals"><img class="bar-valimg" data-barval="energy" alt="" /></span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill" data-bar-fill></div>
+            <span class="bar-marker bar-marker-down" data-bar-marker></span>
+            <span class="bar-marker bar-marker-up" data-bar-marker></span>
+          </div>
+          <div class="bar-annot">
+            <span class="bar-side">Új jármű hatótávja teljes töltéssel (WLTP)</span>
+            <span class="bar-vals"><img class="bar-valimg" data-barval="range" alt="" /></span>
+          </div>
+        </div>
+
+        <p class="note">
+          *A SOH érték a BMS adatai vagy a jármű gyártójának kapcsolódó adatai alapján kerül kiszámításra.
+          A VoltCheck nem vállal garanciát az akkumulátor tényleges SOH értékét vagy fizikai állapotát illetően.
+        </p>
+      </section>
+
+      <section class="block">
+        <h3 class="block-title">Akkumulátor hibakódok</h3>
+        <div class="dtc" data-dtc>
+          <span class="dtc-icon">✓</span>
+          <span data-f="dtc"></span>
+        </div>
+      </section>
+
+      <footer class="rep-footer">
+        <div class="foot-accent"></div>
+        <div class="foot-left">
+          <svg class="vc-logo-sm" viewBox="0 0 56 56" aria-hidden="true">
+            <polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/>
+          </svg>
+          <span>VoltCheck</span>
+        </div>
+        <div class="foot-mid"><a>voltcheck.hu</a></div>
+        <div class="foot-right">Oldal 1 / 4</div>
+      </footer>
+    </section>
+
+    <!-- ============================================================
+         PAGE 2 — Module Voltage Information (stats + first table chunk)
+         ============================================================ -->
+    <section class="page page-break">
+      <header class="rep-header rep-header-sm">
+        <div class="brand-left">
+          <svg class="vc-logo" viewBox="0 0 56 56" aria-hidden="true">
+            <polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/>
+          </svg>
+          <div class="brand-text">
+            <span class="brand-name">VoltCheck<span class="brand-dot"></span></span>
+          </div>
+        </div>
+        <div class="meta-right">
+          <div><b data-f="vehicle"></b></div>
+          <div>Készítés: <b data-f="creationDate"></b></div>
+          <div>Jelentés azonosító: <b data-f="reportId"></b></div>
+        </div>
+      </header>
+
+      <h2 class="rep-subtitle big">Teszt paraméterek</h2>
+
+      <section class="block">
+        <h3 class="block-title">Modul- és cella feszültség információk</h3>
+        <div class="stats-grid">
+          <div><span>Maximum modul feszültség:</span><b data-f="moduleVMax"></b></div>
+          <div><span>Minimum modul feszültség:</span><b data-f="moduleVMin"></b></div>
+          <div><span>Átlagos modul feszültség:</span><b data-f="moduleVAvg"></b></div>
+          <div><span>Modul feszültség különbség:</span><b data-f="moduleVDelta"></b></div>
+          <div><span>Alap modul feszültség különbség:</span><b data-f="moduleVStd"></b></div>
+          <div><span>Maximum cella feszültség:</span><b data-f="cellVMax"></b></div>
+          <div><span>Minimum cella feszültség:</span><b data-f="cellVMin"></b></div>
+          <div><span>Átlagos cella feszültség:</span><b data-f="cellVAvg"></b></div>
+          <div><span>Cella feszültség különbség:</span><b data-f="cellVDelta"></b></div>
+          <div><span>Alap cella feszültség különbség:</span><b data-f="cellVStd"></b></div>
+        </div>
+
+        <div class="legend">
+          <span class="lg-text">Alacsony</span>
+          <div class="lg-grad"></div>
+          <span class="lg-text">Magas</span>
+          <span class="lg-warn">⚠</span>
+          <span class="lg-text">Figyelmeztetés</span>
+          <span class="lg-notok">!</span>
+          <span class="lg-text">Nem OK</span>
+        </div>
+
+        <table class="mod-table" data-table="voltage-1">
+          <thead>
+            <tr>
+              <th class="mh" colspan="2">Modul</th>
+              <th class="ch" colspan="8">Cella</th>
+            </tr>
+            <tr class="sub">
+              <th></th><th></th>
+              <th>1</th><th>2</th><th>3</th><th>4</th>
+              <th>5</th><th>6</th><th>7</th><th>8</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <footer class="rep-footer">
+        <div class="foot-accent"></div>
+        <div class="foot-left">
+          <svg class="vc-logo-sm" viewBox="0 0 56 56" aria-hidden="true">
+            <polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/>
+          </svg>
+          <span>VoltCheck</span>
+        </div>
+        <div class="foot-mid"><a>voltcheck.hu</a></div>
+        <div class="foot-right">Oldal 2 / 4</div>
+      </footer>
+    </section>
+
+    <!-- ============================================================
+         PAGE 3 — rest of module table + Module Temperature Information
+         ============================================================ -->
+    <section class="page page-break">
+      <header class="rep-header rep-header-sm">
+        <div class="brand-left">
+          <svg class="vc-logo" viewBox="0 0 56 56" aria-hidden="true">
+            <polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/>
+          </svg>
+          <div class="brand-text">
+            <span class="brand-name">VoltCheck<span class="brand-dot"></span></span>
+          </div>
+        </div>
+        <div class="meta-right">
+          <div><b data-f="vehicle"></b></div>
+          <div>Készítés: <b data-f="creationDate"></b></div>
+          <div>Jelentés azonosító: <b data-f="reportId"></b></div>
+        </div>
+      </header>
+
+      <table class="mod-table" data-table="voltage-2">
+        <tbody></tbody>
+      </table>
+
+      <section class="block">
+        <h3 class="block-title">Modul hőmérséklet információk</h3>
+        <div class="stats-grid">
+          <div><span>Maximum hőmérséklet:</span><b data-f="tempMax"></b></div>
+          <div><span>Minimum hőmérséklet:</span><b data-f="tempMin"></b></div>
+          <div><span>Átlagos hőmérséklet:</span><b data-f="tempAvg"></b></div>
+        </div>
+
+        <div class="legend">
+          <span class="lg-text">Alacsony</span>
+          <div class="lg-grad"></div>
+          <span class="lg-text">Magas</span>
+          <span class="lg-warn">⚠</span>
+          <span class="lg-text">Figyelmeztetés</span>
+          <span class="lg-notok">!</span>
+          <span class="lg-text">Nem OK</span>
+        </div>
+
+        <table class="mod-table" data-table="temperature">
+          <thead>
+            <tr>
+              <th></th>
+              <th>1</th><th>2</th><th>3</th><th>4</th>
+              <th>5</th><th>6</th><th>7</th><th>8</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <footer class="rep-footer">
+        <div class="foot-accent"></div>
+        <div class="foot-left">
+          <svg class="vc-logo-sm" viewBox="0 0 56 56" aria-hidden="true">
+            <polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/>
+          </svg>
+          <span>VoltCheck</span>
+        </div>
+        <div class="foot-mid"><a>voltcheck.hu</a></div>
+        <div class="foot-right">Oldal 3 / 4</div>
+      </footer>
+    </section>
+
+    <!-- ============================================================
+         PAGE 4 — Disclaimer only (testing-org form deleted)
+         ============================================================ -->
+    <section class="page page-break">
+      <header class="rep-header rep-header-sm">
+        <div class="brand-left">
+          <svg class="vc-logo" viewBox="0 0 56 56" aria-hidden="true">
+            <polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/>
+          </svg>
+          <div class="brand-text">
+            <span class="brand-name">VoltCheck<span class="brand-dot"></span></span>
+          </div>
+        </div>
+        <div class="meta-right">
+          <div><b data-f="vehicle"></b></div>
+          <div>Készítés: <b data-f="creationDate"></b></div>
+          <div>Jelentés azonosító: <b data-f="reportId"></b></div>
+        </div>
+      </header>
+
+      <section class="block disclaimer">
+        <h3 class="block-title">Jogi nyilatkozat</h3>
+        <ol>
+          <li>
+            A jelentésben szereplő minden adat a jármű gyártójának eredeti BMS adataiból vagy azokból
+            származtatott adatokból származik. Az adatfrissítések késedelme vagy az átvitel során fellépő
+            késleltetés miatt a jelentésben szereplő adatok eltérhetnek az akkumulátor tényleges állapotától.
+          </li>
+          <li>
+            A funkció és a hozzá tartozó elemzési stratégia által generált eredmények csak tájékoztató
+            jellegűek. A VoltCheck nem vállal garanciát az adatok hitelességére, pontosságára vagy
+            teljességére, és nem nyújt sem kifejezett, sem hallgatólagos garanciát az akkumulátor tényleges
+            SOH értékét vagy fizikai egészségi állapotát illetően. A funkció használatával Ön elfogadja a
+            jelen jogi nyilatkozat összes feltételét.
+          </li>
+          <li>
+            Ez a jelentés csak a jármű vizsgálatához és karbantartásához nyújt tájékoztatást. A VoltCheck
+            nem vállal felelősséget az adatok használatából eredő balesetekért, vagyoni károkért vagy
+            személyi sérülésekért.
+          </li>
+        </ol>
+        <p class="form-note">Megjegyzés: Kérjük, mentsen egy másolatot a jelentésről saját nyilvántartásához.</p>
+      </section>
+
+      <footer class="rep-footer">
+        <div class="foot-accent"></div>
+        <div class="foot-left">
+          <svg class="vc-logo-sm" viewBox="0 0 56 56" aria-hidden="true">
+            <polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/>
+          </svg>
+          <span>VoltCheck</span>
+        </div>
+        <div class="foot-mid"><a>voltcheck.hu</a></div>
+        <div class="foot-right">Oldal 4 / 4</div>
+      </footer>
+    </section>
+
+  </div>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>
