@@ -512,6 +512,80 @@ button:hover { background: #000; }
 .foot-left { display: flex; align-items: center; gap: 6px; color: var(--vc-ink); font-weight: 600; }
 .foot-mid a { color: var(--vc-green-dark); text-decoration: none; font-weight: 600; }
 
+/* ============================================================
+   NON-CARA REPORT ("Battery Pack Test Report")
+   Reuses the CARA report's branding (.rep-header, .block, .kv-grid,
+   .mod-table, .rep-footer …). These rules add the bits unique to it:
+   the dynamic-pagination flow box, the warning colours and the sign-off
+   form.
+   ============================================================ */
+
+/* Footer is absolutely positioned, so the page reserves no bottom padding;
+   the flow box below carries an explicit height so JS can detect overflow
+   (scrollHeight > clientHeight) while paginating. */
+.page-nc { padding: 14mm 16mm 0; }
+.nc-flow {
+  height: calc(297mm - 14mm - 24mm);
+  overflow: hidden;
+}
+
+.nc-advice, .nc-result {
+  font-size: 9.5px;
+  color: var(--vc-ink-2);
+  line-height: 1.5;
+  margin: 3mm 0 0;
+}
+.nc-result { margin: 0 0 3mm; }
+.nc-advice b, .nc-result b { color: var(--vc-ink); }
+
+/* Warning colours — read straight from Autel's own rendered output
+   (black = OK, amber = warning, red = immediate attention). */
+.nc-warn { color: #c47d00 !important; }
+.nc-crit { color: var(--autel-red) !important; }
+.mod-table td.cell.nc-warn { color: #c47d00 !important; font-weight: 700; }
+.mod-table td.cell.nc-crit { color: var(--autel-red) !important; font-weight: 700; }
+
+/* Temperature column: small sensor id above the value */
+.nc-th-mod { width: 16%; }
+.nc-temp-cell .nc-sensor {
+  display: block;
+  font-size: 8px;
+  color: var(--vc-muted);
+  font-weight: 600;
+}
+.nc-temp-cell b { font-weight: 700; }
+
+/* Colour legend under the cell-voltage table */
+.nc-legend {
+  display: flex;
+  gap: 14px;
+  justify-content: flex-end;
+  font-size: 9px;
+  color: var(--vc-muted);
+  margin-bottom: 2mm;
+}
+.nc-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.nc-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.nc-dot-ok { background: var(--vc-ink); }
+.nc-dot-warn { background: #c47d00; }
+.nc-dot-crit { background: var(--autel-red); }
+
+/* Sign-off form */
+.nc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4mm;
+  margin: 2mm 0 5mm;
+  font-size: 11px;
+}
+.nc-form > div { display: flex; align-items: baseline; gap: 8px; }
+.nc-form span:first-child { color: var(--vc-ink-2); white-space: nowrap; }
+.nc-form .nc-line {
+  flex: 1;
+  border-bottom: 1px solid var(--vc-line);
+  height: 12px;
+}
+
 /* App-shell hint shown after a preview is rendered */
 .print-hint {
   margin-top: 12px;
@@ -546,8 +620,17 @@ button:hover { background: #000; }
     left: auto;
     top: auto;
     width: auto;
+    /* The 8px top margin (a screen gap) would push page 1 down the sheet and
+       spill it onto a blank second sheet — zero it for print. */
+    margin: 0;
   }
-  .preview { background: #fff; }
+  /* Drop the on-screen preview chrome entirely: the 24px padding and the
+     scale(.78)/negative-margin transform are screen-only affordances. If they
+     survive into print they offset the first .page down the sheet, so its
+     297mm box spills onto a second sheet and a blank page appears between
+     pages. Reset them so every .page maps 1:1 onto an A4 sheet. */
+  .preview { background: #fff; padding: 0; }
+  .preview .report { transform: none; margin-bottom: 0; }
 
   .page {
     margin: 0;

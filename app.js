@@ -65,15 +65,41 @@ async function handleFile(file) {
     const buf = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
     const text = await extractText(pdf);
-    const data = parseReport(text);
-    if (!data.soh && !data.vehicle) {
+
+    // The generator supports two Autel report layouts. We auto-detect which
+    // one was uploaded and build the matching VoltCheck report:
+    //   - "cara"    → SOH Blitz Test (CARA Approved Battery Health Check):
+    //                 has an SOH health grade + gauges + energy/range bars.
+    //   - "noncara" → Battery Pack Test Report: a raw pack diagnostic with NO
+    //                 SOH grade. The report presents the pack data it does have
+    //                 and simply omits the CARA badge (no approval is implied).
+    const kind = detectKind(text);
+
+    let data;
+    if (kind === "noncara") {
+      data = await parseNonCara(pdf);
+      if (!data.moduleTemps.length && !data.moduleCells.length && !data.vehicle) {
+        throw new Error(
+          "Nem találhatóak a várt mezők a PDF-ben. Biztos, hogy ez egy Autel akkumulátor jelentés?"
+        );
+      }
+      renderNonCara(data);
+    } else if (kind === "cara") {
+      data = parseReport(text);
+      if (!data.soh && !data.vehicle) {
+        throw new Error(
+          "Nem találhatóak a várt mezők a PDF-ben. Biztos, hogy ez az Autel SOH Blitz Test jelentés?"
+        );
+      }
+      data.gaugeImage = await extractGaugeArtwork(pdf);
+      data.barValues  = await extractBarValueArtwork(pdf);
+      renderReport(data);
+    } else {
       throw new Error(
-        "Nem találhatóak a várt mezők a PDF-ben. Biztos, hogy ez az Autel SOH Blitz Test jelentés?"
+        "Ismeretlen PDF típus. Tölts fel egy Autel SOH Blitz Test vagy Battery Pack Test jelentést."
       );
     }
-    data.gaugeImage = await extractGaugeArtwork(pdf);
-    data.barValues  = await extractBarValueArtwork(pdf);
-    renderReport(data);
+
     currentTitle = buildFilename(data);
     downloadB.hidden = false;
     dropSub.textContent = `Beolvasva: ${file.name}`;
@@ -90,9 +116,28 @@ function showError(msg) {
 
 function buildFilename(d) {
   const stamp = (d.creationDate || d.testTime || "").replace(/[^\d]/g, "").slice(0, 12);
-  const vin = (d.vin || "").replace(/[^\w-]/g, "");
+  const vinRaw = d.vin && d.vin !== "--" ? d.vin : "";
+  const vin = vinRaw.replace(/[^\w-]/g, "");
   const parts = ["voltcheck", "jelentes", vin, stamp].filter(Boolean);
   return parts.join("-");
+}
+
+/* ============================================================
+   Report-type detection
+   The two Autel layouts carry distinctive title/section strings:
+     - CARA "SOH Blitz Test" → "Battery Status Report" / "SOH Blitz Test",
+       and an SOH percentage in the Pack Information block.
+     - non-CARA "Battery Pack Test Report" → "Battery Pack Info" /
+       "Cell Voltage Information" and no SOH percentage.
+   ============================================================ */
+function detectKind(text) {
+  if (/SOH Blitz Test/i.test(text) || /Battery Status Report/i.test(text)) return "cara";
+  if (/Battery Pack Test Report/i.test(text) ||
+      /Cell Voltage Information/i.test(text) ||
+      /Battery Pack Info/i.test(text)) return "noncara";
+  // Fallback: a text SOH percentage only appears in the CARA layout.
+  if (/SOH\*?:\s*[\d.]+\s*%/.test(text)) return "cara";
+  return "unknown";
 }
 
 /* ============================================================
@@ -629,6 +674,491 @@ function buildTempRow(row, tMin, tMax) {
     tr.appendChild(td);
   }
   return tr;
+}
+
+
+/* ============================================================
+   ============================================================
+   NON-CARA REPORT  ("Battery Pack Test Report")
+   ============================================================
+   A raw battery-pack diagnostic. Unlike the SOH Blitz Test it has no
+   SOH health grade, no gauges and no energy/range bars, so it carries no
+   CARA badge. The VoltCheck report mirrors the CARA layout's look &
+   branding as closely as the data allows and presents what this test
+   actually measures: pack-level stats, a per-module temperature table and
+   a per-module cell-voltage table — all extracted faithfully, including
+   Autel's own OK/Warning/Critical colour coding (read straight from the
+   rendered pixels).
+   ============================================================ */
+
+/* Small Hungarian phrase map for the free-text "Results:" / "Maintenance
+   advice:" strings. Known Autel phrases are translated; anything else is
+   passed through unchanged so we never invent or drop information. */
+const NC_PHRASES = [
+  ["The temperatures of all battery modules are OK.", "Az összes akkumulátormodul hőmérséklete megfelelő."],
+  ["The cell voltages of all battery modules are OK.", "Az összes akkumulátormodul cellafeszültsége megfelelő."],
+  ["Check the thermal management system", "Ellenőrizze a hőkezelő rendszert"],
+];
+function ncTranslate(s) {
+  if (!s) return s;
+  let out = s;
+  for (const [en, hu] of NC_PHRASES) out = out.split(en).join(hu);
+  return out;
+}
+
+/* ============================================================
+   parseNonCara — geometry-aware extraction
+   Renders every page to a canvas (for warning-colour sampling) and walks
+   the positioned text items. Field labels like "Rated Voltage: 342V" come
+   as single items; the pack-info stats are split label/value pairs we join
+   by row; the two tables are reconstructed from item coordinates.
+   ============================================================ */
+async function parseNonCara(pdf) {
+  const SCALE = 3;
+  const pageItems = [];   // per-page array of { s, x, y, p }
+  const canvases  = [];   // per-page { ctx, viewport }
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({ scale: SCALE });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    const content = await page.getTextContent();
+    const items = content.items
+      .filter(i => i.str && i.str.trim())
+      .map(i => ({ s: i.str.trim(), x: i.transform[4], y: i.transform[5], p }));
+    pageItems.push(items);
+    canvases.push({ ctx, viewport });
+  }
+
+  const all = pageItems.flat();
+  const flat = all.map(i => i.s).join("\n");
+
+  // Reading-order ordinal so we can split items into the temperature
+  // section vs. the cell-voltage section (module labels Mn appear in both).
+  const ord = it => it.p * 100000 + (1000 - it.y);
+  const cellTitle = all.find(i => /^Cell Voltage Information/.test(i.s));
+  const cellTitleOrd = cellTitle ? ord(cellTitle) : Infinity;
+
+  const m1 = (re, def = "") => { const m = flat.match(re); return m ? m[1].trim() : def; };
+
+  // Sample the rendered colour of a value item → 'ok' | 'warn' | 'crit',
+  // preserving Autel's own classification (black / orange / red).
+  const classify = (it) => {
+    const { ctx, viewport } = canvases[it.p - 1];
+    const t = pdfjsLib.Util.transform(viewport.transform, [1, 0, 0, 1, it.x, it.y]);
+    const cx = Math.round(t[4]), cy = Math.round(t[5]);
+    const x0 = Math.max(0, cx - 4);
+    const y0 = Math.max(0, cy - 16);
+    const w  = Math.min(ctx.canvas.width  - x0, 90);
+    const h  = Math.min(ctx.canvas.height - y0, 22);
+    if (w <= 0 || h <= 0) return "ok";
+    const data = ctx.getImageData(x0, y0, w, h).data;
+    let red = 0, orange = 0, ink = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      if (Math.min(r, g, b) > 170) continue;          // background / light grid
+      ink++;
+      if (r > 140 && g < 100 && b < 100) red++;        // Autel red  (#e30613)
+      else if (r > 160 && g > 90 && b < 120 && g < r - 30) orange++; // amber
+    }
+    if (!ink) return "ok";
+    if (red    / ink > 0.3) return "crit";
+    if (orange / ink > 0.3) return "warn";
+    return "ok";
+  };
+
+  // ---- Pack-info stats: pair a label item with the value on its row ----
+  const rightValue = (label) => {
+    if (!label) return null;
+    const cands = all
+      .filter(i => i.p === label.p && Math.abs(i.y - label.y) < 5 && i.x > label.x + 1)
+      .sort((a, b) => a.x - b.x);
+    return cands[0] || null;
+  };
+  const stat = (labelText) => {
+    const label = all.find(i => i.s === labelText || i.s.replace(/\s+/g, " ") === labelText);
+    const v = rightValue(label);
+    return v ? { value: v.s, warn: classify(v) } : null;
+  };
+
+  // ---- Temperature table ----
+  // Module labels Mn in the left column, before the cell-voltage section.
+  const tempMods = all
+    .filter(i => /^M\d+$/.test(i.s) && i.x < 70 && ord(i) < cellTitleOrd)
+    .sort((a, b) => ord(a) - ord(b));
+  const moduleTemps = tempMods.map(m => {
+    const idx = parseInt(m.s.slice(1), 10);
+    const totalV = all.find(i => i.p === m.p && Math.abs(i.y - m.y) < 4 &&
+                                 i.x > 90 && i.x < 170 && /V$/.test(i.s));
+    const sensor = all.find(i => i.p === m.p && i.y > m.y && i.y - m.y < 18 &&
+                                 i.x > 330 && /^T\d+$/.test(i.s));
+    const tempItem = all.find(i => i.p === m.p && i.y < m.y && m.y - i.y < 18 &&
+                                   i.x > 330 && /°?C$/.test(i.s));
+    return {
+      idx,
+      totalV: totalV ? totalV.s : "",
+      sensor: sensor ? sensor.s : "",
+      temp:   tempItem ? tempItem.s : "",
+      warn:   tempItem ? classify(tempItem) : "ok",
+    };
+  });
+
+  // ---- Cell-voltage table ----
+  // Each module's cell values sit on the row just below its Mn label.
+  const cellMods = all
+    .filter(i => /^M\d+$/.test(i.s) && i.x < 70 && ord(i) >= cellTitleOrd)
+    .sort((a, b) => ord(a) - ord(b));
+  const moduleCells = cellMods.map(m => {
+    const idx = parseInt(m.s.slice(1), 10);
+    const vals = all
+      .filter(i => i.p === m.p && i.y < m.y && m.y - i.y < 15 &&
+                   /^[\d.]+V$/.test(i.s) && i.x > 80)
+      .sort((a, b) => a.x - b.x)
+      .map(v => ({ value: v.s, warn: classify(v) }));
+    return { idx, cells: vals };
+  }).filter(r => r.cells.length);
+
+  // "Results:" lines (one per table) and the maintenance advice.
+  const resultLines = all.filter(i => /^Results:/.test(i.s)).sort((a, b) => ord(a) - ord(b));
+
+  return {
+    // headline / vehicle
+    title:        m1(/^(\d{4}\/[^\n]*?Battery Pack Test Report)/m) || "Akkumulátorcsomag teszt jelentés",
+    vehicle:      (all.find(i => /^\d{4}\/.+\/.+\/.+/.test(i.s)) || {}).s || "",
+    vin:          m1(/\nVIN:\s*(.+)/),
+    batteryCode:  m1(/Battery Code:\s*(.+)/),
+    maxStorable:  m1(/Maximum Storable Energy:\s*(.+)/),
+    odometer:     m1(/Odometer Reading:\s*(.+)/),
+    licensePlate: m1(/License Plate:\s*(.+)/),
+    ratedVoltage: m1(/Rated Voltage:\s*(.+)/),
+    ratedCapacity:m1(/Rated Capacity:\s*(.+)/),
+
+    // customer / device / shop
+    custName:     m1(/\nName:\s*(.+)/),
+    scanner:      m1(/Scanner:\s*(.+)/),
+    version:      m1(/Version:\s*(.+)/),
+    serialNumber: m1(/Serial Number:\s*(.+)/),
+    shopName:     m1(/Shop Name:\s*(.+)/),
+    shopEmail:    m1(/Email:\s*(.+)/),
+    shopAddress:  m1(/Address:\s*(.+)/),
+    technician:   m1(/Technician:\s*(.+)/),
+    reportId:     m1(/Report ID:\s*(.+)/),
+    creationDate: m1(/Creation Date:\s*(.+)/),
+
+    // pack-info stats
+    totalVoltage: stat("Total voltage:"),
+    totalCurrent: stat("Total current:"),
+    cellVMax:     stat("Cell maximum voltage:"),
+    cellVMin:     stat("Cell minimum voltage:"),
+    tempMax:      stat("Maximum temperature:"),
+    tempMin:      stat("Minimum temperature:"),
+    voltageDelta: stat("Voltage delta:"),
+    modules:      stat("Modules:"),
+    soc:          stat("SOC"),
+
+    maintenance:  m1(/(Maintenance advice:[^\n]*)/),
+    tempResults:  resultLines[0] ? resultLines[0].s : "",
+    cellResults:  resultLines[1] ? resultLines[1].s : "",
+
+    moduleTemps,
+    moduleCells,
+  };
+}
+
+/* ============================================================
+   Render (non-CARA)
+   Content here is dynamic (variable module / cell counts), so instead of
+   the fixed page templates the CARA report uses, we build pages on the fly
+   and measure: append a block, and if it overflows the page's flow box
+   (.nc-flow has a fixed height + overflow:hidden, so scrollHeight tells us),
+   start a fresh page. Tables carry their header onto each continuation page.
+   ============================================================ */
+
+const NC_LOGO = `<svg class="vc-logo" viewBox="0 0 56 56" aria-hidden="true"><polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/></svg>`;
+const NC_LOGO_SM = `<svg class="vc-logo-sm" viewBox="0 0 56 56" aria-hidden="true"><polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/></svg>`;
+
+function el(tag, cls, txt) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (txt != null) e.textContent = txt;
+  return e;
+}
+
+function ncFooter() {
+  const f = el("footer", "rep-footer");
+  f.innerHTML =
+    `<div class="foot-accent"></div>` +
+    `<div class="foot-left">${NC_LOGO_SM}<span>VoltCheck</span></div>` +
+    `<div class="foot-mid"><a>voltcheck.hu</a></div>` +
+    `<div class="foot-right" data-pageno></div>`;
+  return f;
+}
+
+function ncHeader(d, full) {
+  const v = s => (s && s !== "--") ? s : "—";
+  if (full) {
+    const h = el("header", "rep-header");
+    h.innerHTML =
+      `<div class="brand-left">${NC_LOGO}` +
+        `<div class="brand-text"><span class="brand-name">VoltCheck<span class="brand-dot"></span></span>` +
+        `<span class="brand-tag">Akkumulátor diagnosztika</span></div></div>` +
+      `<div class="brand-right"><div class="autel-mark">AUTEL<sup>®</sup></div>` +
+        `<div class="meta-right"><div>Jelentés azonosító: <b>${v(d.reportId)}</b></div>` +
+        `<div>Készítés: <b>${v(d.creationDate)}</b></div></div></div>`;
+    return h;
+  }
+  const h = el("header", "rep-header rep-header-sm");
+  h.innerHTML =
+    `<div class="brand-left">${NC_LOGO}` +
+      `<div class="brand-text"><span class="brand-name">VoltCheck<span class="brand-dot"></span></span></div></div>` +
+    `<div class="meta-right"><div><b>${v(d.vehicle)}</b></div>` +
+      `<div>Készítés: <b>${v(d.creationDate)}</b></div>` +
+      `<div>Jelentés azonosító: <b>${v(d.reportId)}</b></div></div>`;
+  return h;
+}
+
+function ncMakePage(d, full) {
+  const page = el("section", "page page-nc");
+  const flow = el("div", "nc-flow");
+  page.appendChild(flow);
+  flow.appendChild(ncHeader(d, full));
+  page.appendChild(ncFooter());
+  return { el: page, flow };
+}
+
+/* key/value grid like the CARA report's .kv-grid; each pair may carry a
+   warn class ('warn' | 'crit') that tints the value. */
+function ncKvGrid(pairs) {
+  const grid = el("div", "kv-grid");
+  for (const p of pairs) {
+    if (p == null) continue;
+    const row = el("div");
+    const span = el("span", null, p.label);
+    const b = el("b", p.warn && p.warn !== "ok" ? `nc-${p.warn}` : null, p.value || "—");
+    row.append(span, b);
+    grid.appendChild(row);
+  }
+  return grid;
+}
+
+function ncBlock(title, ...children) {
+  const block = el("section", "block");
+  block.appendChild(el("h3", "block-title", title));
+  for (const c of children) if (c) block.appendChild(c);
+  return block;
+}
+
+function ncStat(s, fallback = "—") {
+  return s && s.value ? { value: s.value, warn: s.warn } : { value: fallback };
+}
+
+function renderNonCara(d) {
+  preview.innerHTML = "";
+  const root = el("div", "report");
+  preview.appendChild(root); // mount now so layout measurements are live
+  // The preview wrapper must be visible (not display:none) DURING the build,
+  // otherwise every clientHeight/scrollHeight reads 0 and pagination can't
+  // detect overflow.
+  previewW.hidden = false;
+
+  const ctl = {
+    pages: [],
+    cur: null,
+    newPage(full) { this.cur = ncMakePage(d, full); root.appendChild(this.cur.el); this.pages.push(this.cur); },
+    overflow() { return this.cur.flow.scrollHeight > this.cur.flow.clientHeight + 1; },
+    add(node) {
+      this.cur.flow.appendChild(node);
+      if (this.overflow()) { this.cur.flow.removeChild(node); this.newPage(false); this.cur.flow.appendChild(node); }
+    },
+  };
+
+  ctl.newPage(true);
+
+  // Title only — the report describes what it is (a pack diagnostic) and
+  // simply omits the CARA badge; it does not enumerate what it is not.
+  const head = el("div");
+  head.appendChild(el("h1", "rep-title", "Akkumulátorcsomag-jelentés"));
+  head.appendChild(el("h2", "rep-subtitle", "Akkumulátor pakk teszt"));
+  ctl.add(head);
+
+  // Vehicle / device info.
+  const vv = s => (s && s !== "--") ? s : "—";
+  ctl.add(ncBlock("Jármű adatok", ncKvGrid([
+    { label: "Modell:", value: vv(d.vehicle) },
+    { label: "Kilométeróra-állás:", value: vv(d.odometer) },
+    { label: "Alvázszám:", value: vv(d.vin) },
+    { label: "Rendszám:", value: vv(d.licensePlate) },
+    { label: "Akkumulátor kód:", value: vv(d.batteryCode) },
+    { label: "Névleges feszültség:", value: vv(d.ratedVoltage) },
+    { label: "Max. tárolható energia:", value: vv(d.maxStorable) },
+    { label: "Névleges kapacitás:", value: vv(d.ratedCapacity) },
+  ])));
+  ctl.add(ncBlock("Eszköz és ügyfél adatok", ncKvGrid([
+    { label: "Szkenner:", value: vv(d.scanner) },
+    { label: "Ügyfél:", value: vv(d.custName) },
+    { label: "Szoftver verzió:", value: vv(d.version) },
+    { label: "Technikus:", value: vv(d.technician) },
+    { label: "Sorozatszám:", value: vv(d.serialNumber) },
+    { label: "Műhely:", value: vv(d.shopName) },
+  ])));
+
+  // Pack info: stats grid + maintenance advice.
+  const pack = el("section", "block");
+  pack.appendChild(el("h3", "block-title", "Akkumulátorcsomag információk"));
+  pack.appendChild(ncKvGrid([
+    { label: "Teljes feszültség:", ...ncStat(d.totalVoltage) },
+    { label: "Teljes áram:", ...ncStat(d.totalCurrent) },
+    { label: "Max. cellafeszültség:", ...ncStat(d.cellVMax) },
+    { label: "Min. cellafeszültség:", ...ncStat(d.cellVMin) },
+    { label: "Maximum hőmérséklet:", ...ncStat(d.tempMax) },
+    { label: "Minimum hőmérséklet:", ...ncStat(d.tempMin) },
+    { label: "Feszültség különbség:", ...ncStat(d.voltageDelta) },
+    { label: "Modulok száma:", ...ncStat(d.modules) },
+    { label: "SOC:", ...ncStat(d.soc) },
+  ]));
+  if (d.maintenance) {
+    const adv = el("p", "nc-advice");
+    const txt = ncTranslate(d.maintenance.replace(/^Maintenance advice:\s*/i, ""));
+    adv.innerHTML = `<b>Karbantartási javaslat:</b> ${txt}`;
+    pack.appendChild(adv);
+  }
+  ctl.add(pack);
+
+  // ---------- Temperature table (splittable across pages) ----------
+  ncPlaceTable(ctl, {
+    title: "Modul hőmérséklet információk",
+    result: d.tempResults,
+    head: ["Modul", "Teljes feszültség", "Hőmérséklet"],
+    units: d.moduleTemps.map(r => ncTempRow(r)),
+  });
+
+  // ---------- Cell-voltage table ----------
+  const maxCells = d.moduleCells.reduce((m, r) => Math.max(m, r.cells.length), 0);
+  ncPlaceTable(ctl, {
+    title: "Cellafeszültség információk",
+    result: d.cellResults,
+    legend: true,
+    head: ["Modul", ...Array.from({ length: maxCells }, (_, i) => `#${i + 1}`)],
+    units: d.moduleCells.map(r => ncCellRow(r, maxCells)),
+  });
+
+  // ---------- Sign-off form + disclaimer ----------
+  ctl.add(ncForm());
+
+  // Fill in page numbers now that we know the total.
+  ctl.pages.forEach((pg, i) => {
+    const s = pg.el.querySelector("[data-pageno]");
+    if (s) s.textContent = `Oldal ${i + 1} / ${ctl.pages.length}`;
+  });
+
+  currentReport = root;
+  previewW.hidden = false;
+}
+
+/* Build a table section (title pill + optional results line + legend +
+   table head) and flow its row "units" across pages, repeating the header. */
+function ncPlaceTable(ctl, { title, result, legend, head, units }) {
+  const buildShell = (continued) => {
+    const wrap = el("section", "block");
+    wrap.appendChild(el("h3", "block-title", continued ? `${title} (folytatás)` : title));
+    if (!continued && result) {
+      const r = el("p", "nc-result");
+      r.innerHTML = `<b>Eredmény:</b> ${ncTranslate(result.replace(/^Results:\s*/i, ""))}`;
+      wrap.appendChild(r);
+    }
+    if (!continued && legend) wrap.appendChild(ncLegend());
+    const table = el("table", "mod-table");
+    const thead = el("thead");
+    const tr = el("tr");
+    head.forEach((h, i) => {
+      const th = el("th", null, h);
+      if (i === 0) th.classList.add("nc-th-mod");
+      tr.appendChild(th);
+    });
+    thead.appendChild(tr);
+    const tbody = el("tbody");
+    table.append(thead, tbody);
+    wrap.appendChild(table);
+    return { wrap, tbody };
+  };
+
+  let shell = buildShell(false);
+  ctl.add(shell.wrap);
+  for (const unit of units) {
+    shell.tbody.appendChild(unit);
+    if (ctl.overflow()) {
+      shell.tbody.removeChild(unit);
+      ctl.newPage(false);
+      shell = buildShell(true);
+      ctl.cur.flow.appendChild(shell.wrap);
+      shell.tbody.appendChild(unit);
+    }
+  }
+}
+
+function ncLegend() {
+  const l = el("div", "nc-legend");
+  l.innerHTML =
+    `<span><i class="nc-dot nc-dot-ok"></i>OK</span>` +
+    `<span><i class="nc-dot nc-dot-warn"></i>Figyelmeztetés</span>` +
+    `<span><i class="nc-dot nc-dot-crit"></i>Azonnali beavatkozás szükséges</span>`;
+  return l;
+}
+
+function ncTempRow(r) {
+  const tr = el("tr");
+  tr.appendChild(el("td", "row-label", `M${r.idx}`));
+  tr.appendChild(el("td", "row-modval", r.totalV || "—"));
+  const td = el("td", "nc-temp-cell");
+  if (r.sensor) td.appendChild(el("span", "nc-sensor", r.sensor));
+  const b = el("b", r.warn && r.warn !== "ok" ? `nc-${r.warn}` : null, r.temp || "—");
+  td.appendChild(b);
+  tr.appendChild(td);
+  return tr;
+}
+
+function ncCellRow(r, maxCells) {
+  const tr = el("tr");
+  tr.appendChild(el("td", "row-label", `M${r.idx}`));
+  for (let i = 0; i < maxCells; i++) {
+    const c = r.cells[i];
+    const td = el("td", "cell");
+    if (c) {
+      td.textContent = c.value;
+      if (c.warn && c.warn !== "ok") td.classList.add(`nc-${c.warn}`);
+    }
+    tr.appendChild(td);
+  }
+  return tr;
+}
+
+function ncForm() {
+  const block = el("section", "block disclaimer");
+  block.appendChild(el("h3", "block-title", "Aláírás és jogi nyilatkozat"));
+  const form = el("div", "nc-form");
+  form.innerHTML =
+    `<div><span>Ügyfél neve:</span><span class="nc-line"></span></div>` +
+    `<div><span>Technikus:</span><span class="nc-line"></span></div>` +
+    `<div><span>Dátum:</span><span class="nc-line"></span></div>`;
+  block.appendChild(form);
+  const ol = el("ol");
+  ol.innerHTML =
+    `<li>Ez a jelentés akkumulátorcsomag-diagnosztikai mérés, amely a jármű akkumulátorcsomagjának ` +
+    `mért feszültség- és hőmérsékletadatait tartalmazza a vizsgálat időpontjában.</li>` +
+    `<li>A jelentésben szereplő adatok a jármű gyártójának BMS adataiból vagy azokból származtatott ` +
+    `adatokból származnak, és csak tájékoztató jellegűek. A VoltCheck nem vállal garanciát az adatok ` +
+    `hitelességére, pontosságára vagy teljességére, sem az akkumulátor tényleges fizikai állapotára.</li>` +
+    `<li>Ez a jelentés csak a jármű vizsgálatához és karbantartásához nyújt tájékoztatást. A VoltCheck ` +
+    `nem vállal felelősséget az adatok használatából eredő balesetekért, vagyoni károkért vagy ` +
+    `személyi sérülésekért.</li>`;
+  block.appendChild(ol);
+  block.appendChild(el("p", "form-note", "Megjegyzés: Kérjük, mentsen egy másolatot a jelentésről saját nyilvántartásához."));
+  return block;
 }
 
 
