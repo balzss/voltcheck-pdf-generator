@@ -20,6 +20,11 @@
     <span class="drop-sub" id="dropSub">Húzd ide vagy kattints</span>
   </label>
 
+  <label class="phone-field">
+    <span>Telefonszám a láblécben</span>
+    <input type="tel" id="phone" placeholder="+36 ..." autocomplete="off" />
+  </label>
+
   <button id="download" type="button" hidden>Mentés PDF-ként</button>
   <p id="error" class="error" hidden></p>
 
@@ -33,7 +38,7 @@
   <div class="report">
 
     <!-- ============================================================
-         PAGE 1 — Header, vehicle, pack info (3 gauges), bars, DTCs
+         PAGE 1 — Header, vehicle, pack info (SOH + metrics), bars, DTCs
          ============================================================ -->
     <section class="page">
       <header class="rep-header">
@@ -65,35 +70,32 @@
           <div><span>Kilométeróra-állás:</span><b data-f="odometer"></b></div>
           <div><span>Alvázszám:</span><b data-f="vin"></b></div>
           <div><span>Sorozatszám:</span><b data-f="sn"></b></div>
+          <div><span>Töltöttség (SOC):</span><b data-f="soc"></b></div>
         </div>
       </section>
 
       <section class="block">
         <h3 class="block-title">Akkumulátor-csomag információk</h3>
 
-        <!-- Gauge artwork is cropped straight from the original Autel PDF
-             so the letter grades + arrow indicators stay exactly as Autel
-             produced them. Below it: 3 columns of Hungarian labels and
-             the extracted metric values, aligned with the image columns. -->
-        <img class="gauges-img" data-gauges-img alt="Akkumulátor-csomag állapotjelzők" />
-        <div class="gauges-grid">
-          <div class="gcol">
-            <div class="gcol-label">Akkumulátor egészségi állapot</div>
-            <div class="gcol-metrics">
-              <div><span>SOH*:</span><b data-f="soh"></b></div>
-              <div><span>SOC:</span><b data-f="soc"></b></div>
-            </div>
+        <!-- 3-column summary. Left column highlights the SOH headline value
+             in large type; the two right columns list every other pack metric
+             (SOC, temperatures, voltages) in compact label/value rows. -->
+        <div class="pack-grid">
+          <div class="pack-soh">
+            <div class="pack-soh-label">Akkumulátor egészségi állapot</div>
+            <div class="pack-soh-value" data-f="soh"></div>
+            <div class="pack-soh-sub">SOH*</div>
           </div>
-          <div class="gcol">
-            <div class="gcol-label">Statikus hőmérséklet-konzisztencia</div>
-            <div class="gcol-metrics">
+          <div class="pack-col">
+            <div class="pack-col-title">Hőmérséklet-konzisztencia</div>
+            <div class="pack-col-metrics">
               <div><span>Akkumulátor hőmérséklet:</span><b data-f="batteryTemp"></b></div>
               <div><span>Max. hőmérsékletkülönbség:</span><b data-f="maxTempDelta"></b></div>
             </div>
           </div>
-          <div class="gcol">
-            <div class="gcol-label">Statikus feszültség-konzisztencia</div>
-            <div class="gcol-metrics">
+          <div class="pack-col">
+            <div class="pack-col-title">Feszültség-konzisztencia</div>
+            <div class="pack-col-metrics">
               <div><span>Akkumulátor feszültség:</span><b data-f="batteryVoltage"></b></div>
               <div><span>Max. feszültségkülönbség:</span><b data-f="maxVoltageDelta"></b></div>
             </div>
@@ -145,8 +147,8 @@
           </svg>
           <span>VoltCheck</span>
         </div>
-        <div class="foot-mid"><a>voltcheck.hu</a></div>
-        <div class="foot-right">Oldal 1 / 4</div>
+        <div class="foot-mid"><a href="https://voltcheck.hu">voltcheck.hu</a></div>
+        <div class="foot-right"><a data-phone></a></div>
       </footer>
     </section>
 
@@ -221,8 +223,8 @@
           </svg>
           <span>VoltCheck</span>
         </div>
-        <div class="foot-mid"><a>voltcheck.hu</a></div>
-        <div class="foot-right">Oldal 2 / 4</div>
+        <div class="foot-mid"><a href="https://voltcheck.hu">voltcheck.hu</a></div>
+        <div class="foot-right"><a data-phone></a></div>
       </footer>
     </section>
 
@@ -288,8 +290,8 @@
           </svg>
           <span>VoltCheck</span>
         </div>
-        <div class="foot-mid"><a>voltcheck.hu</a></div>
-        <div class="foot-right">Oldal 3 / 4</div>
+        <div class="foot-mid"><a href="https://voltcheck.hu">voltcheck.hu</a></div>
+        <div class="foot-right"><a data-phone></a></div>
       </footer>
     </section>
 
@@ -345,8 +347,8 @@
           </svg>
           <span>VoltCheck</span>
         </div>
-        <div class="foot-mid"><a>voltcheck.hu</a></div>
-        <div class="foot-right">Oldal 4 / 4</div>
+        <div class="foot-mid"><a href="https://voltcheck.hu">voltcheck.hu</a></div>
+        <div class="foot-right"><a data-phone></a></div>
       </footer>
     </section>
 

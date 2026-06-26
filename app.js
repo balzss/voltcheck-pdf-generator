@@ -15,6 +15,31 @@ const downloadB = $("#download");
 const previewW  = $("#previewWrap");
 const preview   = $("#preview");
 const dropSub   = $("#dropSub");
+const phoneInput = $("#phone");
+
+/* ---------- Footer phone number ----------
+   Kept out of the repo to avoid publishing a personal number on GitHub.
+   The value is entered once in the page and persisted in localStorage;
+   it's injected into every report footer ([data-phone]) at render time. */
+const PHONE_KEY = "voltcheck-phone";
+phoneInput.value = localStorage.getItem(PHONE_KEY) || "";
+phoneInput.addEventListener("input", () => {
+  localStorage.setItem(PHONE_KEY, phoneInput.value.trim());
+  applyPhone(currentReport);
+});
+function getPhone() {
+  return phoneInput.value.trim();
+}
+function applyPhone(root) {
+  if (!root) return;
+  const phone = getPhone();
+  // tel: URIs must contain only digits and a leading "+", no spaces/dashes.
+  const telHref = phone ? "tel:" + phone.replace(/[^\d+]/g, "") : "";
+  root.querySelectorAll("[data-phone]").forEach(el => {
+    el.textContent = phone;
+    if (el.tagName === "A") el.href = telHref;
+  });
+}
 
 let currentReport = null;
 /* Used as the print dialog's suggested filename — most browsers default
@@ -91,7 +116,6 @@ async function handleFile(file) {
           "Nem találhatóak a várt mezők a PDF-ben. Biztos, hogy ez az Autel SOH Blitz Test jelentés?"
         );
       }
-      data.gaugeImage = await extractGaugeArtwork(pdf);
       data.barValues  = await extractBarValueArtwork(pdf);
       renderReport(data);
     } else {
@@ -166,66 +190,6 @@ async function extractText(pdf) {
     if (line.length) allLines.push(line.join(" "));
   }
   return allLines.join("\n");
-}
-
-/* ============================================================
-   Crop just the 3 gauge semicircles (arc + grade letter + arrow)
-   out of the source PDF page 1. We can't reproduce Autel's grade
-   letters or arrow positions ourselves — they're vector paths
-   rather than extractable text — so we keep the original pixels.
-
-   Vertical bounds:
-     top    = below the "Pack Information" green pill
-     bottom = just above the first English label row ("Battery
-              Health Status" etc.), which sits directly above
-              the "SOH*:" metric line.
-   ============================================================ */
-async function extractGaugeArtwork(pdf) {
-  const SCALE = 3;
-  const page = await pdf.getPage(1);
-  const viewport = page.getViewport({ scale: SCALE });
-
-  const canvas = document.createElement("canvas");
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  const ctx = canvas.getContext("2d");
-  await page.render({ canvasContext: ctx, viewport }).promise;
-
-  const content = await page.getTextContent();
-  let packInfoY = null;
-  let sohY = null;
-
-  for (const item of content.items) {
-    const str = (item.str || "").trim();
-    const m = pdfjsLib.Util.transform(viewport.transform, item.transform);
-    const y = m[5];
-    if (str === "Pack Information") packInfoY = y;
-    if (/^SOH\*?:/.test(str)) {
-      sohY = sohY === null ? y : Math.min(sohY, y);
-    }
-  }
-
-  if (packInfoY === null || sohY === null) return null;
-
-  // 18pt past the Pack Information baseline clears the pill.
-  // 58pt above the SOH*: baseline cuts the English gauge labels
-  // ("Battery Health Status" etc.) AND the thin underline stroke
-  // that sits just above the metric rows.
-  const topY    = packInfoY + 18 * SCALE;
-  const bottomY = sohY      - 52 * SCALE;
-  if (bottomY <= topY) return null;
-
-  // Trim 4% off each horizontal edge so the page's faint vertical
-  // margin guide lines don't end up in the cropped strip.
-  const leftX  = viewport.width * 0.04;
-  const rightX = viewport.width * 0.96;
-
-  const crop = document.createElement("canvas");
-  crop.width  = rightX - leftX;
-  crop.height = bottomY - topY;
-  crop.getContext("2d").drawImage(canvas, -leftX, -topY);
-
-  return crop.toDataURL("image/png");
 }
 
 /* ============================================================
@@ -553,13 +517,6 @@ function renderReport(d) {
     el.textContent = fields[el.dataset.f] ?? "—";
   });
 
-  /* ---------- Gauge artwork (cropped from the source PDF) ---------- */
-  if (d.gaugeImage) {
-    root.querySelectorAll("[data-gauges-img]").forEach(img => {
-      img.src = d.gaugeImage;
-    });
-  }
-
   /* ---------- Energy / range load bar ----------
      Generated bar: the fill and both triangle markers sit at the SOH
      boundary. The numeric value groups are the original PDF's own pixels,
@@ -613,6 +570,7 @@ function renderReport(d) {
   preview.innerHTML = "";
   preview.appendChild(root);
   currentReport = root;
+  applyPhone(root);
   previewW.hidden = false;
 }
 
@@ -894,8 +852,8 @@ function ncFooter() {
   f.innerHTML =
     `<div class="foot-accent"></div>` +
     `<div class="foot-left">${NC_LOGO_SM}<span>VoltCheck</span></div>` +
-    `<div class="foot-mid"><a>voltcheck.hu</a></div>` +
-    `<div class="foot-right" data-pageno></div>`;
+    `<div class="foot-mid"><a href="https://voltcheck.hu">voltcheck.hu</a></div>` +
+    `<div class="foot-right"><a data-phone></a></div>`;
   return f;
 }
 
@@ -1050,13 +1008,8 @@ function renderNonCara(d) {
   // ---------- Sign-off form + disclaimer ----------
   ctl.add(ncForm());
 
-  // Fill in page numbers now that we know the total.
-  ctl.pages.forEach((pg, i) => {
-    const s = pg.el.querySelector("[data-pageno]");
-    if (s) s.textContent = `Oldal ${i + 1} / ${ctl.pages.length}`;
-  });
-
   currentReport = root;
+  applyPhone(root);
   previewW.hidden = false;
 }
 

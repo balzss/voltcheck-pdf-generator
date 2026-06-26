@@ -63,6 +63,30 @@ html, body {
 .drop-title { font-weight: 600; font-size: 15px; }
 .drop-sub { color: var(--vc-muted); font-size: 13px; }
 
+.phone-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-self: flex-start;
+}
+.phone-field span {
+  font-size: 13px;
+  color: var(--vc-muted);
+}
+.phone-field input {
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--vc-line);
+  background: #fff;
+  color: var(--vc-ink);
+  min-width: 220px;
+}
+.phone-field input:focus {
+  outline: none;
+  border-color: var(--vc-green);
+}
+
 button {
   font: inherit;
   padding: 12px 18px;
@@ -247,44 +271,71 @@ button:hover { background: #000; }
 .kv-grid b { font-weight: 600; color: var(--vc-ink); }
 
 /* ============================================================
-   PACK INFORMATION — gauge artwork cropped from source + HU labels
+   PACK INFORMATION — SOH headline + compact metric columns
+   Left column: SOH in large type. Two right columns: every other
+   pack metric (SOC, temperatures, voltages) in label/value rows.
    ============================================================ */
-.gauges-img {
-  width: 100%;
-  height: auto;
-  display: block;
-  margin-bottom: 3mm;
-}
-.gauges-grid {
+.pack-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 5mm;
   margin-bottom: 5mm;
+  align-items: stretch;
 }
-.gcol { text-align: center; }
-.gcol-label {
+.pack-soh {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4mm 3mm;
+  background: var(--vc-green-soft);
+  border-radius: 4px;
+}
+.pack-soh-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--vc-ink-2);
+  margin-bottom: 1mm;
+}
+.pack-soh-value {
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--vc-ink);
+}
+.pack-soh-sub {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--vc-muted);
+  margin-top: 1mm;
+}
+.pack-col {
+  display: flex;
+  flex-direction: column;
+}
+.pack-col-title {
   font-size: 11px;
   font-weight: 700;
   color: var(--vc-ink-2);
   margin-bottom: 2mm;
-  min-height: 8mm;   /* keep columns vertically aligned when label wraps */
+  min-height: 8mm;   /* keep columns vertically aligned when title wraps */
 }
-.gcol-metrics {
+.pack-col-metrics {
   border-top: 1px solid var(--vc-line);
   padding-top: 2mm;
   font-size: 9.5px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  text-align: left;
+  gap: 3px;
 }
-.gcol-metrics > div {
+.pack-col-metrics > div {
   display: flex;
   justify-content: space-between;
   gap: 8px;
 }
-.gcol-metrics span { color: var(--vc-muted); }
-.gcol-metrics b { color: var(--vc-ink); font-weight: 600; }
+.pack-col-metrics span { color: var(--vc-muted); }
+.pack-col-metrics b { color: var(--vc-ink); font-weight: 600; }
 
 /* ---------- Bars (energy / range, generated) ----------
    One shared bar: the fill = SOH. Energy is annotated above it,
@@ -511,6 +562,7 @@ button:hover { background: #000; }
 }
 .foot-left { display: flex; align-items: center; gap: 6px; color: var(--vc-ink); font-weight: 600; }
 .foot-mid a { color: var(--vc-green-dark); text-decoration: none; font-weight: 600; }
+.foot-right a { color: inherit; text-decoration: none; }
 
 /* ============================================================
    NON-CARA REPORT ("Battery Pack Test Report")
@@ -611,7 +663,7 @@ button:hover { background: #000; }
     padding: 0;
   }
   /* Hide the app chrome — only .report should print */
-  .drop, button, .error { display: none !important; }
+  .drop, button, .error, .phone-field { display: none !important; }
   .app { padding: 0; max-width: none; margin: 0; min-height: 0; display: block; }
 
   /* Move the preview back into normal flow so page-break rules work */

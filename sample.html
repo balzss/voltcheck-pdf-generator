@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VoltCheck — Minta jelentés (PÉLDA)</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  /* ---- sample-only tweaks ---------------------------------------------
+     Reuses the real report CSS (styles.css) but renders hard-coded DUMMY
+     data as ONE continuous strip (no page breaks) — a conceptual showcase
+     for the marketing site, never a real customer's data. ---------------- */
+  body { background: #fff; margin: 0; }
+  .sample-stage { width: max-content; }
+
+  /* One continuous page: auto height, no shadow/margin so the screenshot is
+     exactly the document edges, footer floats right under the last block. */
+  .sample-stage .page {
+    height: auto; min-height: 0;
+    margin: 0; box-shadow: none;
+    padding: 14mm 16mm 12mm;
+    overflow: visible;
+  }
+  .sample-stage .rep-footer {
+    position: static; left: auto; right: auto; bottom: auto;
+    margin-top: 8mm;
+  }
+
+  /* A soft section divider between the "summary" and "measurements" halves. */
+  .strip-divider {
+    border: 0; border-top: 1px solid var(--vc-line);
+    margin: 7mm 0 6mm;
+  }
+
+  /* Repeated diagonal watermark, tiled down the whole strip (added by JS so it
+     adapts to the strip's height). */
+  .wm {
+    position: absolute;
+    left: 0; right: 0;
+    text-align: center;
+    transform: rotate(-28deg);
+    font-size: 58px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    color: rgba(0, 230, 118, .12);
+    pointer-events: none;
+    z-index: 5;
+    white-space: nowrap;
+  }
+
+  /* Generated semicircle health gauge (replaces the artwork cropped from a
+     real upload, which only exists for a real PDF). */
+  .gauge { width: 100%; max-width: 150px; margin: 0 auto; display: block; }
+  .gauge-grade { font-weight: 900; font-size: 30px; }
+</style>
+</head>
+<body>
+<div class="sample-stage">
+  <div class="report">
+    <section class="page" id="strip">
+
+      <!-- Header -->
+      <header class="rep-header">
+        <div class="brand-left">
+          <svg class="vc-logo" viewBox="0 0 56 56" aria-hidden="true">
+            <polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/>
+          </svg>
+          <div class="brand-text">
+            <span class="brand-name">VoltCheck<span class="brand-dot"></span></span>
+            <span class="brand-tag">Akkumulátor diagnosztika</span>
+          </div>
+        </div>
+        <div class="brand-right">
+          <div class="autel-mark">AUTEL<sup>®</sup></div>
+          <img class="cara-img" src="Logo-Cara-ABHC-short-2023.png" alt="CARA - Approved Battery Health Check" />
+        </div>
+      </header>
+
+      <h1 class="rep-title">Akkumulátor-állapotjelentés</h1>
+      <h2 class="rep-subtitle">SOH Gyorsteszt</h2>
+
+      <!-- Vehicle data -->
+      <section class="block">
+        <h3 class="block-title">Jármű adatok</h3>
+        <div class="kv-grid">
+          <div><span>Modell:</span><b>Példa EV 64&nbsp;kWh</b></div>
+          <div><span>Teszt időpontja:</span><b>2026-06-05 10:24</b></div>
+          <div><span>Névleges feszültség:</span><b>355&nbsp;V</b></div>
+          <div><span>Névleges kapacitás:</span><b>180&nbsp;Ah</b></div>
+          <div><span>Kilométeróra-állás:</span><b>48&nbsp;320&nbsp;km</b></div>
+          <div><span>Alvázszám:</span><b>XXXXXXXX••••12345</b></div>
+          <div><span>Sorozatszám:</span><b>SN-PÉLDA-0000</b></div>
+        </div>
+      </section>
+
+      <!-- Pack info: gauges + range bar + DTC -->
+      <section class="block">
+        <h3 class="block-title">Akkumulátor-csomag információk</h3>
+
+        <div class="gauges-grid">
+          <div class="gcol">
+            <svg class="gauge" viewBox="0 0 200 120" aria-hidden="true" data-gauge data-grade="A" data-pos="0.92"></svg>
+            <div class="gcol-label">Akkumulátor egészségi állapot</div>
+            <div class="gcol-metrics">
+              <div><span>SOH*:</span><b>94%</b></div>
+              <div><span>SOC:</span><b>82%</b></div>
+            </div>
+          </div>
+          <div class="gcol">
+            <svg class="gauge" viewBox="0 0 200 120" aria-hidden="true" data-gauge data-grade="A" data-pos="0.88"></svg>
+            <div class="gcol-label">Statikus hőmérséklet-konzisztencia</div>
+            <div class="gcol-metrics">
+              <div><span>Akkumulátor hőmérséklet:</span><b>24&nbsp;°C</b></div>
+              <div><span>Max. hőmérsékletkülönbség:</span><b>2&nbsp;°C</b></div>
+            </div>
+          </div>
+          <div class="gcol">
+            <svg class="gauge" viewBox="0 0 200 120" aria-hidden="true" data-gauge data-grade="B" data-pos="0.70"></svg>
+            <div class="gcol-label">Statikus feszültség-konzisztencia</div>
+            <div class="gcol-metrics">
+              <div><span>Akkumulátor feszültség:</span><b>352.4&nbsp;V</b></div>
+              <div><span>Max. feszültségkülönbség:</span><b>0.018&nbsp;V</b></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bars-section">
+          <div class="bar-annot">
+            <span class="bar-side">Energia</span>
+            <span class="bar-vals"><b style="font-size:11px">60&nbsp;kWh&nbsp;|&nbsp;64&nbsp;kWh</b></span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill" style="width:94%"></div>
+            <span class="bar-marker bar-marker-down" style="left:94%"></span>
+            <span class="bar-marker bar-marker-up" style="left:94%"></span>
+          </div>
+          <div class="bar-annot">
+            <span class="bar-side">Új jármű hatótávja teljes töltéssel (WLTP)</span>
+            <span class="bar-vals"><b style="font-size:11px">395&nbsp;km&nbsp;|&nbsp;420&nbsp;km</b></span>
+          </div>
+        </div>
+
+        <p class="note">
+          *A SOH érték a BMS adatai vagy a jármű gyártójának kapcsolódó adatai alapján kerül kiszámításra.
+          A VoltCheck nem vállal garanciát az akkumulátor tényleges SOH értékét vagy fizikai állapotát illetően.
+        </p>
+      </section>
+
+      <section class="block">
+        <h3 class="block-title">Akkumulátor hibakódok</h3>
+        <div class="dtc" data-dtc>
+          <span class="dtc-icon">✓</span>
+          <span>Nincs észlelt hibakód</span>
+        </div>
+      </section>
+
+      <hr class="strip-divider" />
+      <h2 class="rep-subtitle big">Teszt paraméterek</h2>
+
+      <!-- Module / cell voltage -->
+      <section class="block">
+        <h3 class="block-title">Modul- és cella feszültség információk</h3>
+        <div class="stats-grid">
+          <div><span>Maximum modul feszültség:</span><b>29.34&nbsp;V</b></div>
+          <div><span>Minimum modul feszültség:</span><b>29.06&nbsp;V</b></div>
+          <div><span>Átlagos modul feszültség:</span><b>29.21&nbsp;V</b></div>
+          <div><span>Modul feszültség különbség:</span><b>0.28&nbsp;V</b></div>
+          <div><span>Alap modul feszültség különbség:</span><b>0.07&nbsp;V</b></div>
+          <div><span>Maximum cella feszültség:</span><b>3.674&nbsp;V</b></div>
+          <div><span>Minimum cella feszültség:</span><b>3.629&nbsp;V</b></div>
+          <div><span>Átlagos cella feszültség:</span><b>3.651&nbsp;V</b></div>
+          <div><span>Cella feszültség különbség:</span><b>0.045&nbsp;V</b></div>
+          <div><span>Alap cella feszültség különbség:</span><b>0.011&nbsp;V</b></div>
+        </div>
+
+        <div class="legend">
+          <span class="lg-text">Alacsony</span>
+          <div class="lg-grad"></div>
+          <span class="lg-text">Magas</span>
+          <span class="lg-warn">⚠</span>
+          <span class="lg-text">Figyelmeztetés</span>
+          <span class="lg-notok">!</span>
+          <span class="lg-text">Nem OK</span>
+        </div>
+
+        <table class="mod-table compact" data-table="voltage-1">
+          <thead>
+            <tr>
+              <th class="mh" colspan="2">Modul</th>
+              <th class="ch" colspan="8">Cella</th>
+            </tr>
+            <tr class="sub">
+              <th></th><th></th>
+              <th>1</th><th>2</th><th>3</th><th>4</th>
+              <th>5</th><th>6</th><th>7</th><th>8</th>
+            </tr>
+          </thead>
+          <tbody data-volt-body></tbody>
+        </table>
+      </section>
+
+      <!-- Module temperature -->
+      <section class="block">
+        <h3 class="block-title">Modul hőmérséklet információk</h3>
+        <div class="stats-grid">
+          <div><span>Maximum hőmérséklet:</span><b>26&nbsp;°C</b></div>
+          <div><span>Minimum hőmérséklet:</span><b>22&nbsp;°C</b></div>
+          <div><span>Átlagos hőmérséklet:</span><b>24&nbsp;°C</b></div>
+        </div>
+
+        <div class="legend">
+          <span class="lg-text">Alacsony</span>
+          <div class="lg-grad"></div>
+          <span class="lg-text">Magas</span>
+          <span class="lg-warn">⚠</span>
+          <span class="lg-text">Figyelmeztetés</span>
+          <span class="lg-notok">!</span>
+          <span class="lg-text">Nem OK</span>
+        </div>
+
+        <table class="mod-table compact" data-table="temperature">
+          <thead>
+            <tr>
+              <th>Modul</th>
+              <th>1</th><th>2</th><th>3</th><th>4</th>
+              <th>5</th><th>6</th><th>7</th><th>8</th>
+            </tr>
+          </thead>
+          <tbody data-temp-body></tbody>
+        </table>
+      </section>
+
+      <footer class="rep-footer">
+        <div class="foot-accent"></div>
+        <div class="foot-left">
+          <svg class="vc-logo-sm" viewBox="0 0 56 56" aria-hidden="true">
+            <polygon points="30,4 14,32 26,32 22,52 42,22 30,22" fill="#00E676"/>
+          </svg>
+          <span>VoltCheck</span>
+        </div>
+        <div class="foot-mid"><a>voltcheck.hu</a></div>
+        <div class="foot-right">Minta jelentés</div>
+      </footer>
+
+    </section>
+  </div>
+</div>
+
+<script>
+  /* Draw a clean semicircle A–F health gauge into each [data-gauge] <svg>. */
+  const GRADE_COLORS = ["#00B85F", "#46c46f", "#9bd14a", "#f4c020", "#f08a24", "#e0463c"];
+  const polar = (cx, cy, r, deg) => {
+    const a = deg * Math.PI / 180;
+    return [cx + r * Math.cos(a), cy - r * Math.sin(a)];
+  };
+  const arc = (cx, cy, r, a0, a1) => {
+    const [x0, y0] = polar(cx, cy, r, a0);
+    const [x1, y1] = polar(cx, cy, r, a1);
+    const large = (a0 - a1) > 180 ? 1 : 0;
+    return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
+  };
+  document.querySelectorAll("[data-gauge]").forEach((svg) => {
+    const grade = svg.dataset.grade || "A";
+    const pos = parseFloat(svg.dataset.pos || "0.9");
+    const cx = 100, cy = 104, r = 78;
+    let html = "";
+    for (let i = 0; i < 6; i++) {
+      const a0 = 180 - i * 30 - 3;
+      const a1 = 180 - (i + 1) * 30 + 3;
+      html += `<path d="${arc(cx, cy, r, a0, a1)}" stroke="${GRADE_COLORS[i]}" stroke-width="14" fill="none" stroke-linecap="round"/>`;
+    }
+    const ndeg = 180 * pos;
+    const [nx, ny] = polar(cx, cy, r - 6, ndeg);
+    html += `<line x1="${cx}" y1="${cy}" x2="${nx}" y2="${ny}" stroke="#1a1a1a" stroke-width="3" stroke-linecap="round"/>`;
+    html += `<circle cx="${cx}" cy="${cy}" r="5" fill="#1a1a1a"/>`;
+    html += `<text x="${cx}" y="${cy - 26}" text-anchor="middle" class="gauge-grade" fill="#1a1a1a">${grade}</text>`;
+    svg.innerHTML = html;
+  });
+
+  /* Heat-map table builder (deterministic dummy data → stable screenshots). */
+  function buildTable(bodySel, opts) {
+    const body = document.querySelector(bodySel);
+    if (!body) return;
+    const { rowsN, colsN, base, span, gen, fmt, label, modVal } = opts;
+    let lo = Infinity, hi = -Infinity;
+    const data = [];
+    for (let m = 0; m < rowsN; m++) {
+      const row = [];
+      for (let c = 0; c < colsN; c++) {
+        const v = base + (gen(m, c) % span.steps) / span.steps * span.range;
+        lo = Math.min(lo, v); hi = Math.max(hi, v);
+        row.push(v);
+      }
+      data.push(row);
+    }
+    const range = hi - lo || 1;
+    let html = "";
+    for (let m = 0; m < rowsN; m++) {
+      let cells = "";
+      for (let c = 0; c < colsN; c++) {
+        const tint = ((data[m][c] - lo) / range).toFixed(2);
+        cells += `<td class="cell" style="--tint:${tint}">${fmt(data[m][c])}</td>`;
+      }
+      const lead = modVal
+        ? `<td class="row-label">${label(m)}</td><td class="row-modval">${modVal(data[m])}</td>`
+        : `<td class="row-label">${label(m)}</td>`;
+      html += `<tr>${lead}${cells}</tr>`;
+    }
+    body.innerHTML = html;
+  }
+
+  buildTable("[data-volt-body]", {
+    rowsN: 8, colsN: 8, base: 3.629, span: { steps: 10, range: 0.045 },
+    gen: (m, c) => m * 7 + c * 3,
+    fmt: (v) => v.toFixed(3),
+    label: (m) => `M${m + 1} (#${m * 8 + 1}-#${(m + 1) * 8})`,
+    modVal: (row) => row.reduce((s, v) => s + v, 0).toFixed(2) + " V",
+  });
+
+  buildTable("[data-temp-body]", {
+    rowsN: 8, colsN: 8, base: 22, span: { steps: 9, range: 4 },
+    gen: (m, c) => m * 5 + c * 2,
+    fmt: (v) => v.toFixed(1) + "°",
+    label: (m) => `M${m + 1}`,
+  });
+
+  /* Tile the watermark down the full strip height. */
+  (function watermark() {
+    const page = document.getElementById("strip");
+    const h = page.scrollHeight;
+    for (let y = 130; y < h; y += 440) {
+      const s = document.createElement("span");
+      s.className = "wm";
+      s.textContent = "PÉLDA · SAMPLE";
+      s.style.top = y + "px";
+      page.appendChild(s);
+    }
+  })();
+</script>
+</body>
+</html>
