@@ -41,6 +41,25 @@ function applyPhone(root) {
   });
 }
 
+/* ---------- Battery DTC section visibility ----------
+   The DTC section is opt-out via a checkbox on the page; the choice is
+   persisted so it sticks across reloads. Hiding the section leaves the
+   rest of the report untouched. */
+const showDtcInput = $("#showDtc");
+const SHOW_DTC_KEY = "voltcheck-show-dtc";
+// Default to shown; only an explicit "false" hides it.
+showDtcInput.checked = localStorage.getItem(SHOW_DTC_KEY) !== "false";
+showDtcInput.addEventListener("change", () => {
+  localStorage.setItem(SHOW_DTC_KEY, showDtcInput.checked);
+  applyDtcVisibility(currentReport);
+});
+function applyDtcVisibility(root) {
+  if (!root) return;
+  root.querySelectorAll('[data-section="dtc"]').forEach(el => {
+    el.hidden = !showDtcInput.checked;
+  });
+}
+
 let currentReport = null;
 /* Used as the print dialog's suggested filename — most browsers default
    to document.title when saving as PDF. */
@@ -382,6 +401,7 @@ function parseReport(text) {
 
     /* --- DTCs --- */
     dtcFault:     !/No fault codes detected/i.test(norm),
+    dtcCodes:     parseDtcCodes(norm),
 
     /* --- Footer-ish metadata --- */
     creationDate: m1(new RegExp(`Creation Date:\\s*(.+?)${NEXT_LABEL}`)),
@@ -422,6 +442,67 @@ function parseReport(text) {
   return out;
 }
 
+/* Parse the individual Battery DTCs listed under the "Battery DTCs" heading.
+   The source renders them as a table (DTC | Description | Status). In the
+   extracted text an entry is either all on one line
+
+     P0A8D00 14 Volt Power Module System Voltage Low Passive/Sporadic
+
+   or, when the description wraps, split across several lines with the code and
+   status on their own lines:
+
+     P056200
+     System Voltage
+     Low Voltage
+     Passive/Sporadic
+
+   The table can also run past a page break, so page footers ("www.autel.com …
+   Page N", "Creation Date:", "Report ID:") and the repeated column header get
+   interleaved — we filter those out. Returns [{ code, description, status }].
+   A healthy pack shows only "No fault codes detected", which yields []. */
+const DTC_CODE_RE = /^([PBCU][0-9A-Z]{4,6})\b\s*(.*)$/;
+const DTC_STATUS_RE = /(?:^|\s)((?:Active|Passive|Sporadic|Intermittent|Confirmed|Pending|Permanent|Temporary|Current|History|Stored)(?:\/(?:Active|Passive|Sporadic|Intermittent|Confirmed|Pending|Permanent|Temporary|Current|History|Stored))*)\s*$/i;
+
+function parseDtcCodes(norm) {
+  const block = norm.match(/Battery DTCs\s*\n([\s\S]*?)(?=\nTest Parameters\b|\nModule Voltage Information\b|$)/i);
+  if (!block) return [];
+
+  const isNoise = l =>
+    !l ||
+    /No fault codes detected/i.test(l) ||
+    /DTCs detected/i.test(l) ||                      // "Inactive/Active DTCs detected" summary
+    /^DTC\b.*\bDescription\b.*\bStatus\b/i.test(l) || // repeated column header
+    /www\.autel\.com/i.test(l) ||
+    /Creation Date:/i.test(l) ||
+    /Report ID:/i.test(l);
+
+  const lines = block[1].split("\n").map(l => l.trim()).filter(l => !isNoise(l));
+
+  // Group lines into entries, each starting at a line that begins with a code.
+  const entries = [];
+  let cur = null;
+  for (const line of lines) {
+    const cm = line.match(DTC_CODE_RE);
+    if (cm) {
+      cur = { code: cm[1], parts: cm[2] ? [cm[2]] : [] };
+      entries.push(cur);
+    } else if (cur) {
+      cur.parts.push(line);
+    }
+  }
+
+  return entries.map(e => {
+    let rest = e.parts.join(" ").replace(/\s+/g, " ").trim();
+    let status = "";
+    const sm = rest.match(DTC_STATUS_RE);
+    if (sm) {
+      status = sm[1].trim();
+      rest = rest.slice(0, sm.index).trim();
+    }
+    return { code: e.code, description: rest, status };
+  });
+}
+
 /* Parse module voltage rows.
    Each row has the form:  M<i> (#<a>-#<b>) <moduleV> V <c1> V <c2> V <c3> V <c4> V
    Some BMSes have more cells per module — accept 1–8 cell values. */
@@ -458,6 +539,66 @@ function parseTemperatureRows(flat) {
     });
   }
   return rows;
+}
+
+/* Build a dedicated page for the battery fault codes and insert it right
+   after page 1. Page 1 has no room for a variable-length table, and the
+   source report itself gives the DTCs their own space. The page reuses the
+   compact header/footer chrome from the template's later pages (cloned so the
+   already-populated meta and the [data-phone] binding come along for free).
+   Tagged data-section="dtc" so the page-toggle checkbox hides it too. */
+function buildDtcPage(root, d, page1Dtc) {
+  const page = document.createElement("section");
+  page.className = "page page-break";
+  page.setAttribute("data-section", "dtc");
+
+  const header = root.querySelector(".page.page-break .rep-header-sm");
+  if (header) page.appendChild(header.cloneNode(true));
+
+  const title = document.createElement("h2");
+  title.className = "rep-subtitle big";
+  title.textContent = "Akkumulátor hibakódok";
+  page.appendChild(title);
+
+  const block = document.createElement("section");
+  block.className = "block";
+
+  const indicator = document.createElement("div");
+  indicator.className = "dtc has-fault";
+  indicator.innerHTML = '<span class="dtc-icon">!</span>';
+  const label = document.createElement("span");
+  label.textContent = `Hibakódok észlelve (${d.dtcCodes.length})`;
+  indicator.appendChild(label);
+  block.appendChild(indicator);
+
+  const table = document.createElement("table");
+  table.className = "dtc-table";
+  table.innerHTML =
+    "<thead><tr><th>Kód</th><th>Leírás</th><th>Státusz</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  d.dtcCodes.forEach(item => {
+    const tr = document.createElement("tr");
+    const c = document.createElement("td");
+    c.className = "dtc-code";
+    c.textContent = item.code;
+    const desc = document.createElement("td");
+    desc.textContent = item.description || "—";
+    const st = document.createElement("td");
+    st.className = "dtc-status";
+    st.textContent = item.status || "—";
+    tr.append(c, desc, st);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  block.appendChild(table);
+  page.appendChild(block);
+
+  const footer = root.querySelector(".rep-footer");
+  if (footer) page.appendChild(footer.cloneNode(true));
+
+  // Insert after page 1 (the page that currently holds the DTC section).
+  const page1 = page1Dtc ? page1Dtc.closest(".page") : root.querySelector(".page");
+  page1.after(page);
 }
 
 /* ============================================================
@@ -539,6 +680,15 @@ function renderReport(d) {
       el.classList.add("has-fault");
       el.querySelector(".dtc-icon").textContent = "!";
     });
+    // When we managed to extract the individual codes, the list can be long
+    // (and even paginates in the source), so it won't fit in the scrap space
+    // at the bottom of page 1. Move the whole section to its own dedicated
+    // page and drop the cramped page-1 block to avoid duplicating it.
+    if (d.dtcCodes.length) {
+      const page1Dtc = root.querySelector('.page [data-section="dtc"]');
+      buildDtcPage(root, d, page1Dtc);
+      if (page1Dtc) page1Dtc.remove();
+    }
   }
 
   /* ---------- Module / cell voltage table (kept on a single page) ----------
@@ -571,6 +721,7 @@ function renderReport(d) {
   preview.appendChild(root);
   currentReport = root;
   applyPhone(root);
+  applyDtcVisibility(root);
   previewW.hidden = false;
 }
 

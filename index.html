@@ -25,6 +25,11 @@
     <input type="tel" id="phone" placeholder="+36 ..." autocomplete="off" />
   </label>
 
+  <label class="toggle-field">
+    <input type="checkbox" id="showDtc" checked />
+    <span>Akkumulátor hibakódok szekció megjelenítése</span>
+  </label>
+
   <button id="download" type="button" hidden>Mentés PDF-ként</button>
   <p id="error" class="error" hidden></p>
 
@@ -131,7 +136,7 @@
         </p>
       </section>
 
-      <section class="block">
+      <section class="block" data-section="dtc">
         <h3 class="block-title">Akkumulátor hibakódok</h3>
         <div class="dtc" data-dtc>
           <span class="dtc-icon">✓</span>

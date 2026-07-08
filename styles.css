@@ -87,6 +87,22 @@ html, body {
   border-color: var(--vc-green);
 }
 
+.toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  font-size: 13px;
+  color: var(--vc-muted);
+  cursor: pointer;
+}
+.toggle-field input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--vc-green);
+  cursor: pointer;
+}
+
 button {
   font: inherit;
   padding: 12px 18px;
@@ -418,6 +434,35 @@ button:hover { background: #000; }
   font-size: 12px;
 }
 .dtc.has-fault .dtc-icon { background: #d8443c; }
+/* Fault-code table on the dedicated DTC page. */
+.dtc-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 4mm;
+  font-size: 10px;
+  line-height: 1.35;
+}
+.dtc-table thead th {
+  text-align: left;
+  padding: 2mm 3mm;
+  background: var(--vc-ink);
+  color: #fff;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.dtc-table tbody td {
+  padding: 1.8mm 3mm;
+  border-bottom: 1px solid var(--vc-line);
+  vertical-align: top;
+}
+.dtc-table tbody tr:nth-child(even) { background: var(--vc-surface); }
+.dtc-table .dtc-code {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.dtc-table .dtc-status { white-space: nowrap; }
 
 /* ============================================================
    STATS GRID (page 2/3 stats)
@@ -663,7 +708,7 @@ button:hover { background: #000; }
     padding: 0;
   }
   /* Hide the app chrome — only .report should print */
-  .drop, button, .error, .phone-field { display: none !important; }
+  .drop, button, .error, .phone-field, .toggle-field { display: none !important; }
   .app { padding: 0; max-width: none; margin: 0; min-height: 0; display: block; }
 
   /* Move the preview back into normal flow so page-break rules work */
