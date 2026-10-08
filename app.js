@@ -122,7 +122,7 @@ async function handleFile(file) {
     let data;
     if (kind === "noncara") {
       data = await parseNonCara(pdf);
-      if (!data.moduleTemps.length && !data.moduleCells.length && !data.vehicle) {
+      if (!data.moduleTemps.length && !data.moduleCells.length && !data.moduleRows.length && !data.vehicle) {
         throw new Error(
           "Nem találhatóak a várt mezők a PDF-ben. Biztos, hogy ez egy Autel akkumulátor jelentés?"
         );
@@ -853,6 +853,13 @@ async function parseNonCara(pdf) {
   const cellTitle = all.find(i => /^Cell Voltage Information/.test(i.s));
   const cellTitleOrd = cellTitle ? ord(cellTitle) : Infinity;
 
+  // Some scanners (e.g. Toyota hybrid packs) don't measure individual cells
+  // at all — instead of the Nissan-style two tables (per-module temperature,
+  // then per-cell voltage), they report ONE combined table titled "Battery
+  // Module Information" with rows labeled "CSC<n>" and columns Total
+  // Voltage / Voltage delta / Resistance / Temperature.
+  const moduleTitle = all.find(i => /^Battery Module Information/.test(i.s));
+
   const m1 = (re, def = "") => { const m = flat.match(re); return m ? m[1].trim() : def; };
 
   // Sample the rendered colour of a value item → 'ok' | 'warn' | 'crit',
@@ -895,9 +902,31 @@ async function parseNonCara(pdf) {
     return v ? { value: v.s, warn: classify(v) } : null;
   };
 
-  // ---- Temperature table ----
+  // ---- Combined module table (CSC layout: one row per CSC, no per-cell
+  //      breakdown) ----
+  const csvMods = moduleTitle
+    ? all.filter(i => /^CSC\d+$/.test(i.s) && i.x < 70 && ord(i) > ord(moduleTitle))
+        .sort((a, b) => ord(a) - ord(b))
+    : [];
+  const moduleRows = csvMods.map(m => {
+    const idx = parseInt(m.s.slice(3), 10);
+    const rowVals = all
+      .filter(i => i.p === m.p && Math.abs(i.y - m.y) < 4 && i.x > m.x)
+      .sort((a, b) => a.x - b.x);
+    const [totalV, voltageDelta, resistance, temp] = rowVals;
+    return {
+      idx,
+      totalV:       totalV ? totalV.s : "",
+      voltageDelta: voltageDelta ? voltageDelta.s : "",
+      resistance:   resistance ? resistance.s : "",
+      temp:         temp ? temp.s : "",
+      warn:         temp ? classify(temp) : "ok",
+    };
+  });
+
+  // ---- Temperature table (Nissan layout) ----
   // Module labels Mn in the left column, before the cell-voltage section.
-  const tempMods = all
+  const tempMods = moduleTitle ? [] : all
     .filter(i => /^M\d+$/.test(i.s) && i.x < 70 && ord(i) < cellTitleOrd)
     .sort((a, b) => ord(a) - ord(b));
   const moduleTemps = tempMods.map(m => {
@@ -917,9 +946,9 @@ async function parseNonCara(pdf) {
     };
   });
 
-  // ---- Cell-voltage table ----
+  // ---- Cell-voltage table (Nissan layout) ----
   // Each module's cell values sit on the row just below its Mn label.
-  const cellMods = all
+  const cellMods = moduleTitle ? [] : all
     .filter(i => /^M\d+$/.test(i.s) && i.x < 70 && ord(i) >= cellTitleOrd)
     .sort((a, b) => ord(a) - ord(b));
   const moduleCells = cellMods.map(m => {
@@ -938,7 +967,11 @@ async function parseNonCara(pdf) {
   return {
     // headline / vehicle
     title:        m1(/^(\d{4}\/[^\n]*?Battery Pack Test Report)/m) || "Akkumulátorcsomag teszt jelentés",
-    vehicle:      (all.find(i => /^\d{4}\/.+\/.+\/.+/.test(i.s)) || {}).s || "",
+    // The vehicle line is whatever immediately follows the "Vehicle
+    // Information" heading — not assumed to start with a 4-digit year,
+    // since some model-year ranges are open-ended ("-11/2010/...") or
+    // start with a month ("11/2010-12/2011/...").
+    vehicle:      m1(/Vehicle Information\n(.+)/),
     vin:          m1(/\nVIN:\s*(.+)/),
     batteryCode:  m1(/Battery Code:\s*(.+)/),
     maxStorable:  m1(/Maximum Storable Energy:\s*(.+)/),
@@ -967,7 +1000,7 @@ async function parseNonCara(pdf) {
     tempMax:      stat("Maximum temperature:"),
     tempMin:      stat("Minimum temperature:"),
     voltageDelta: stat("Voltage delta:"),
-    modules:      stat("Modules:"),
+    modules:      stat("Modules:") || stat("CSCs:"),
     soc:          stat("SOC"),
 
     maintenance:  m1(/(Maintenance advice:[^\n]*)/),
@@ -976,6 +1009,7 @@ async function parseNonCara(pdf) {
 
     moduleTemps,
     moduleCells,
+    moduleRows,
   };
 }
 
@@ -1138,23 +1172,33 @@ function renderNonCara(d) {
   }
   ctl.add(pack);
 
-  // ---------- Temperature table (splittable across pages) ----------
-  ncPlaceTable(ctl, {
-    title: "Modul hőmérséklet információk",
-    result: d.tempResults,
-    head: ["Modul", "Teljes feszültség", "Hőmérséklet"],
-    units: d.moduleTemps.map(r => ncTempRow(r)),
-  });
+  if (d.moduleRows.length) {
+    // Combined CSC layout: one table, no per-cell breakdown to show.
+    ncPlaceTable(ctl, {
+      title: "Modul információk",
+      result: d.tempResults,
+      head: ["Modul", "Teljes feszültség", "Feszültség különbség", "Ellenállás", "Hőmérséklet"],
+      units: d.moduleRows.map(r => ncModuleRow(r)),
+    });
+  } else {
+    // ---------- Temperature table (splittable across pages) ----------
+    ncPlaceTable(ctl, {
+      title: "Modul hőmérséklet információk",
+      result: d.tempResults,
+      head: ["Modul", "Teljes feszültség", "Hőmérséklet"],
+      units: d.moduleTemps.map(r => ncTempRow(r)),
+    });
 
-  // ---------- Cell-voltage table ----------
-  const maxCells = d.moduleCells.reduce((m, r) => Math.max(m, r.cells.length), 0);
-  ncPlaceTable(ctl, {
-    title: "Cellafeszültség információk",
-    result: d.cellResults,
-    legend: true,
-    head: ["Modul", ...Array.from({ length: maxCells }, (_, i) => `#${i + 1}`)],
-    units: d.moduleCells.map(r => ncCellRow(r, maxCells)),
-  });
+    // ---------- Cell-voltage table ----------
+    const maxCells = d.moduleCells.reduce((m, r) => Math.max(m, r.cells.length), 0);
+    ncPlaceTable(ctl, {
+      title: "Cellafeszültség információk",
+      result: d.cellResults,
+      legend: true,
+      head: ["Modul", ...Array.from({ length: maxCells }, (_, i) => `#${i + 1}`)],
+      units: d.moduleCells.map(r => ncCellRow(r, maxCells)),
+    });
+  }
 
   // ---------- Sign-off form + disclaimer ----------
   ctl.add(ncForm());
@@ -1226,6 +1270,19 @@ function ncTempRow(r) {
   return tr;
 }
 
+function ncModuleRow(r) {
+  const tr = el("tr");
+  tr.appendChild(el("td", "row-label", `CSC${r.idx}`));
+  tr.appendChild(el("td", "row-modval", r.totalV || "—"));
+  tr.appendChild(el("td", null, r.voltageDelta || "—"));
+  tr.appendChild(el("td", null, r.resistance || "—"));
+  const b = el("b", r.warn && r.warn !== "ok" ? `nc-${r.warn}` : null, r.temp || "—");
+  const td = el("td");
+  td.appendChild(b);
+  tr.appendChild(td);
+  return tr;
+}
+
 function ncCellRow(r, maxCells) {
   const tr = el("tr");
   tr.appendChild(el("td", "row-label", `M${r.idx}`));
@@ -1244,12 +1301,6 @@ function ncCellRow(r, maxCells) {
 function ncForm() {
   const block = el("section", "block disclaimer");
   block.appendChild(el("h3", "block-title", "Aláírás és jogi nyilatkozat"));
-  const form = el("div", "nc-form");
-  form.innerHTML =
-    `<div><span>Ügyfél neve:</span><span class="nc-line"></span></div>` +
-    `<div><span>Technikus:</span><span class="nc-line"></span></div>` +
-    `<div><span>Dátum:</span><span class="nc-line"></span></div>`;
-  block.appendChild(form);
   const ol = el("ol");
   ol.innerHTML =
     `<li>Ez a jelentés akkumulátorcsomag-diagnosztikai mérés, amely a jármű akkumulátorcsomagjának ` +
