@@ -12,6 +12,7 @@ const drop      = $("#drop");
 const fileInput = $("#file");
 const errorBox  = $("#error");
 const downloadB = $("#download");
+const downloadPngB = $("#downloadPng");
 const previewW  = $("#previewWrap");
 const preview   = $("#preview");
 const dropSub   = $("#dropSub");
@@ -61,6 +62,7 @@ function applyDtcVisibility(root) {
 }
 
 let currentReport = null;
+let currentData = null;
 /* Used as the print dialog's suggested filename — most browsers default
    to document.title when saving as PDF. */
 const ORIGINAL_TITLE = document.title;
@@ -96,6 +98,29 @@ downloadB.addEventListener("click", () => {
     window.removeEventListener("afterprint", restore);
   };
   window.addEventListener("afterprint", restore);
+});
+
+/* ---------- PNG export (CARA reports only) ---------- */
+downloadPngB.addEventListener("click", async () => {
+  if (!currentData) return;
+  errorBox.hidden = true;
+  try {
+    const canvas = await renderPng(currentData);
+    const blob = await new Promise((res, rej) =>
+      canvas.toBlob(b => (b ? res(b) : rej(new Error("A PNG nem hozható létre."))), "image/png")
+    );
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${currentTitle}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (err) {
+    console.error(err);
+    showError(
+      "A PNG exportálása nem sikerült. Ha az oldalt fájlként nyitottad meg (file://), " +
+      "indítsd helyi szerverről (pl. python3 -m http.server). " + (err.message || "")
+    );
+  }
 });
 
 /* ---------- File handling ---------- */
@@ -144,7 +169,10 @@ async function handleFile(file) {
     }
 
     currentTitle = buildFilename(data);
+    currentData = data;
     downloadB.hidden = false;
+    // The PNG is built around the SOH value, which non-CARA reports lack.
+    downloadPngB.hidden = kind !== "cara";
     dropSub.textContent = `Beolvasva: ${file.name}`;
   } catch (err) {
     console.error(err);
@@ -599,6 +627,289 @@ function buildDtcPage(root, d, page1Dtc) {
   // Insert after page 1 (the page that currently holds the DTC section).
   const page1 = page1Dtc ? page1Dtc.closest(".page") : root.querySelector(".page");
   page1.after(page);
+}
+
+/* ============================================================
+   PNG result card (1:1) — a compact summary for used-car listings
+   ============================================================ */
+const PNG_SIZE = 1080;      // design grid
+const PNG_OUT  = 1600;      // exported pixel size
+const PNG_FONT = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+const PNG_BOLT = [[30, 4], [14, 32], [26, 32], [22, 52], [42, 22], [30, 22]];
+
+function loadImage(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error(`Nem tölthető be: ${src}`));
+    img.src = src;
+  });
+}
+
+function pngBolt(ctx, x, y, size, color) {
+  const k = size / 56;
+  ctx.beginPath();
+  PNG_BOLT.forEach(([px, py], i) => {
+    const fn = i ? "lineTo" : "moveTo";
+    ctx[fn](x + px * k, y + py * k);
+  });
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+}
+
+// Shrinks the font until the text fits maxW; returns the size used.
+function fitText(ctx, text, weight, maxSize, maxW) {
+  let size = maxSize;
+  ctx.font = `${weight} ${size}px ${PNG_FONT}`;
+  while (size > 16 && ctx.measureText(text).width > maxW) {
+    size -= 2;
+    ctx.font = `${weight} ${size}px ${PNG_FONT}`;
+  }
+  return size;
+}
+
+// Draws text along a circle; `top` text reads clockwise on the upper arc,
+// bottom text reads left to right on the lower arc.
+function arcText(ctx, text, cx, cy, r, top) {
+  const widths = [...text].map(ch => ctx.measureText(ch).width);
+  const total = widths.reduce((a, b) => a + b, 0) / r;
+  let a = top ? -Math.PI / 2 - total / 2 : Math.PI / 2 + total / 2;
+  [...text].forEach((ch, i) => {
+    const step = widths[i] / r;
+    const mid = top ? a + step / 2 : a - step / 2;
+    ctx.save();
+    ctx.translate(cx + Math.cos(mid) * r, cy + Math.sin(mid) * r);
+    ctx.rotate(mid + (top ? Math.PI / 2 : -Math.PI / 2));
+    ctx.fillText(ch, 0, 0);
+    ctx.restore();
+    a += top ? step : -step;
+  });
+}
+
+function drawSeal(ctx, cx, cy, r) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(-10 * Math.PI / 180);
+  ctx.translate(-cx, -cy);
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#00B85F";
+  ctx.fill();
+
+  // concentric hairlines for a printed-security-seal feel
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.lineWidth = 1.5;
+  for (let rr = r - 8; rr > 30; rr -= 7) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // clear inner disc so the text stays legible
+  ctx.beginPath();
+  ctx.arc(cx, cy, r - 58, 0, Math.PI * 2);
+  ctx.fillStyle = "#00B85F";
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r - 10, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `800 24px ${PNG_FONT}`;
+  arcText(ctx, "VOLTCHECK", cx, cy, r - 34, true);
+  arcText(ctx, "AKKUMULÁTOR", cx, cy, r - 34, false);
+
+  pngBolt(ctx, cx - 30, cy - 62, 60, "#ffffff");
+  ctx.font = `800 20px ${PNG_FONT}`;
+  ctx.fillText("ELLENŐRIZVE", cx, cy + 20);
+  ctx.restore();
+}
+
+// Bordered panel with a rotated label tab on its left edge.
+function pngPanel(ctx, x, y, w, h, label) {
+  const tab = 52;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "#00B85F";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(x + 2, y + 2, w - 4, h - 4);
+  ctx.fillStyle = "#00B85F";
+  ctx.fillRect(x, y, tab, h);
+  ctx.save();
+  ctx.translate(x + tab / 2, y + h / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `800 24px ${PNG_FONT}`;
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "3px";
+  ctx.fillText(label, 0, 2);
+  ctx.restore();
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+  return x + tab + 28; // content left edge
+}
+
+async function renderPng(d) {
+  await document.fonts.ready;
+  const logo = await loadImage("Logo-Cara-ABHC-short-2023.png");
+  // Energy / range value groups are vector art in the source PDF, so the
+  // report crops them as images (extractBarValueArtwork); reuse those crops.
+  const bv = d.barValues || {};
+  const energyImg = bv.energy ? await loadImage(bv.energy.url) : null;
+  const rangeImg  = bv.range  ? await loadImage(bv.range.url)  : null;
+
+  const S = PNG_SIZE;
+  const canvas = document.createElement("canvas");
+  canvas.width = PNG_OUT;
+  canvas.height = PNG_OUT;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(PNG_OUT / S, PNG_OUT / S);
+  const val = v => (v && v !== "--" ? v : "—");
+  const INK = "#14181b";
+  const L = 48, W = S - 96;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, S, S);
+  // soft green strip down the left side
+  ctx.fillStyle = "#d8f8e6";
+  ctx.fillRect(0, 0, 150, S);
+
+  // Title block
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.fillStyle = INK;
+  ctx.font = `600 24px ${PNG_FONT}`;
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "8px";
+  ctx.fillText("FÜGGETLEN", L + 6, 66);
+  ctx.font = `800 64px ${PNG_FONT}`;
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+  ctx.fillText("AKKUMULÁTOR", L + 4, 132);
+  ctx.fillText("ÁLLAPOTJELENTÉS", L + 4, 198);
+
+  // VoltCheck brand, top right
+  pngBolt(ctx, S - 400, 30, 64, "#00B85F");
+  ctx.fillStyle = INK;
+  ctx.font = `800 36px ${PNG_FONT}`;
+  ctx.fillText("VoltCheck", S - 330, 78);
+  ctx.fillStyle = "#00B85F";
+  ctx.fillRect(S - 330 + ctx.measureText("VoltCheck").width + 4, 62, 9, 9);
+  ctx.fillStyle = "#00B85F";
+  ctx.font = `700 14px ${PNG_FONT}`;
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "1px";
+  ctx.fillText("AKKUMULÁTOR DIAGNOSZTIKA", S - 400, 112);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+
+  // JÁRMŰ panel
+  const py = 226, ph = 200;
+  let cx = pngPanel(ctx, L, py, W, ph, "JÁRMŰ");
+  const inner = W - (cx - L) - 24;
+  const valX = cx + 250;
+  const row = (label, value, y) => {
+    ctx.textAlign = "left";
+    ctx.fillStyle = INK;
+    ctx.font = `800 22px ${PNG_FONT}`;
+    ctx.fillText(label, cx, y);
+    fitText(ctx, value, 500, 32, inner - 250);
+    ctx.fillText(value, valX, y);
+  };
+  row("ALVÁZSZÁM", val(d.vin), py + 60);
+  row("KILOMÉTERÓRA", val(d.odometer), py + 112);
+  row("TESZT IDŐPONTJA", val(d.testTime), py + 164);
+
+  // EREDMÉNY panel
+  const ry = py + ph + 20, rh = 372;
+  cx = pngPanel(ctx, L, ry, W, rh, "EREDMÉNY");
+  const rInner = W - (cx - L) - 28;
+  ctx.fillStyle = INK;
+  ctx.font = `800 30px ${PNG_FONT}`;
+  ctx.textAlign = "left";
+  ctx.fillText("EGÉSZSÉGI ÁLLAPOT (SOH)", cx, ry + 48);
+
+  const soh = d.soh ? `${d.soh}` : "—";
+  const sohSize = fitText(ctx, soh, 800, 150, rInner * 0.62);
+  ctx.font = `800 ${sohSize}px ${PNG_FONT}`;
+  const sohW = ctx.measureText(soh).width;
+  ctx.fillStyle = INK;
+  ctx.fillText(soh, cx, ry + 48 + sohSize * 0.86);
+  if (d.soh) {
+    ctx.font = `800 ${Math.round(sohSize * 0.5)}px ${PNG_FONT}`;
+    ctx.fillStyle = "#00B85F";
+    ctx.fillText(" %", cx + sohW, ry + 48 + sohSize * 0.86);
+  }
+
+  // Cell voltage delta, right column of the panel
+  const dx = cx + rInner * 0.66;
+  ctx.fillStyle = "#6b7280";
+  ctx.font = `700 22px ${PNG_FONT}`;
+  ctx.fillText("CELLAFESZÜLTSÉG-", dx, ry + 96);
+  ctx.fillText("ELTÉRÉS", dx, ry + 124);
+  ctx.fillStyle = INK;
+  fitText(ctx, val(d.cellVDelta), 800, 52, rInner * 0.34);
+  ctx.fillText(val(d.cellVDelta), dx, ry + 180);
+
+  // Energy / WLTP range bar, same layout as the PDF: one shared bar filled
+  // to the SOH, triangle markers above and below the fill boundary.
+  const BAR_GREEN = "#4CB050";
+  const pct = d.barFillPct == null ? 0 : d.barFillPct;
+  const annot = (label, img, y) => {
+    ctx.textAlign = "left";
+    ctx.fillStyle = INK;
+    ctx.font = `800 20px ${PNG_FONT}`;
+    ctx.fillText(label, cx, y);
+    if (img) {
+      const h = 28, w = h * (img.width / img.height);
+      ctx.drawImage(img, cx + rInner - w, y - h + 6, w, h);
+    } else {
+      ctx.textAlign = "right";
+      ctx.font = `600 22px ${PNG_FONT}`;
+      ctx.fillText("—", cx + rInner, y);
+    }
+  };
+  const by = ry + 242, bh = 34;
+  annot("ENERGIA", energyImg, by - 30);
+  ctx.fillStyle = "#d9d9d9";
+  ctx.fillRect(cx, by, rInner, bh);
+  ctx.fillStyle = BAR_GREEN;
+  ctx.fillRect(cx, by, (rInner * pct) / 100, bh);
+  const mx = cx + (rInner * pct) / 100;
+  ctx.beginPath();
+  ctx.moveTo(mx - 9, by - 14);
+  ctx.lineTo(mx + 9, by - 14);
+  ctx.lineTo(mx, by - 2);
+  ctx.closePath();
+  ctx.moveTo(mx - 9, by + bh + 14);
+  ctx.lineTo(mx + 9, by + bh + 14);
+  ctx.lineTo(mx, by + bh + 2);
+  ctx.closePath();
+  ctx.fillStyle = BAR_GREEN;
+  ctx.fill();
+  annot("Új jármű hatótávja teljes töltéssel (WLTP)", rangeImg, by + bh + 48);
+
+  // Footer: CARA logo left, seal right
+  const logoH = 84;
+  const logoW = logoH * (logo.width / logo.height);
+  ctx.drawImage(logo, L + 4, S - logoH - 80, logoW, logoH);
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#6b7280";
+  ctx.font = `500 16px ${PNG_FONT}`;
+  ctx.fillText("SOH*: Autel SOH Blitz Test alapján", L + 4, S - 40);
+
+  drawSeal(ctx, S - 48 - 124, S - 14 - 124 - 6, 124);
+
+  ctx.fillStyle = "#00E676";
+  ctx.fillRect(0, S - 12, S, 12);
+
+  return canvas;
 }
 
 /* ============================================================
